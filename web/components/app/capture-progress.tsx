@@ -1,8 +1,8 @@
 'use client';
 
 import type { RemoteParticipant } from 'livekit-client';
-import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
 import { cn } from '@/lib/shadcn/utils';
 
 const CAPTURE_THRESHOLD_SECS = 10;

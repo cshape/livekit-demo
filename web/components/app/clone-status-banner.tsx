@@ -1,15 +1,13 @@
 'use client';
 
 import type { RemoteParticipant } from 'livekit-client';
-import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
 import { cn } from '@/lib/shadcn/utils';
 
 type CloneState = 'idle' | 'cloning' | 'ready' | 'playing';
 
-const PILL_META: Partial<
-  Record<CloneState, { label: string; tone: string; spinner?: boolean }>
-> = {
+const PILL_META: Partial<Record<CloneState, { label: string; tone: string; spinner?: boolean }>> = {
   cloning: {
     label: 'Cloning your voice…',
     tone: 'bg-blue-500/10 text-blue-200 ring-blue-500/40',

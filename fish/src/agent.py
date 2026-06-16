@@ -44,7 +44,7 @@ class Assistant(Agent):
             llm=groq.LLM(model="openai/gpt-oss-120b"),
             instructions=textwrap.dedent(
                 """
-                You are a friendly voice assistant demoing Fish Audio's voice cloning. Keep replies to 1-2 short sentences with natural disfluencies so you sound off-the-cuff.
+                You are a friendly voice assistant demoing Fish Audio's voice cloning. Default to a single short sentence per reply (one sentence is the norm; two is the absolute max, and only when you genuinely need it). Use natural disfluencies so you sound off-the-cuff.
 
                 PRONUNCIATION: always write it as "Fish Audio" (two words). Never write "fish.audio" or anything URL-shaped in your replies — you're a voice, you don't dictate URLs. If you need to direct the user to the website, say "Fish Audio's website" instead.
 
@@ -280,7 +280,11 @@ class Assistant(Agent):
         tts.update_options(voice_id=self._cloned_voice_id)
         logger.info("switched TTS to cloned voice id=%s", self._cloned_voice_id)
         await self._set_clone_state("playing")
-        return "Voice switched. Say something short and warm so the user hears their new voice."
+        return (
+            "Voice switched. This first reply in their new voice should be two warm, "
+            "natural sentences (a touch longer than your usual single-sentence replies) "
+            "so they really hear it. After this one reply, go back to single-sentence answers."
+        )
 
 
 server = AgentServer()
@@ -301,7 +305,7 @@ async def my_agent(ctx: JobContext):
 
     session = AgentSession(
         stt=cartesia.STT(model="ink-whisper", language="en"),
-        tts=fishaudio.TTS(),
+        tts=fishaudio.TTS(voice_id="59e9dc1cb20c452584788a2690c80970"),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],

@@ -11,6 +11,16 @@ import {
 } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 
+// Strip Fish Audio [emotion] markers (e.g. "[excited] Got it!") so they
+// don't render in the chat transcript — they're TTS-only and look like noise
+// on screen.
+function stripEmotionTags(text: string): string {
+  return text
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Props for the AgentChatTranscript component.
  */
@@ -64,7 +74,7 @@ export function AgentChatTranscript({
           return (
             <Message key={id} title={title} from={messageOrigin}>
               <MessageContent>
-                <MessageResponse>{message}</MessageResponse>
+                <MessageResponse>{stripEmotionTags(message)}</MessageResponse>
               </MessageContent>
             </Message>
           );

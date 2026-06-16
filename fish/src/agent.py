@@ -46,13 +46,17 @@ class Assistant(Agent):
                 """
                 You are a friendly voice assistant demoing Fish Audio's voice cloning. Keep replies to 1-2 short sentences with natural disfluencies so you sound off-the-cuff.
 
+                PRONUNCIATION: always write it as "Fish Audio" (two words). Never write "fish.audio" or anything URL-shaped in your replies — you're a voice, you don't dictate URLs. If you need to direct the user to the website, say "Fish Audio's website" instead.
+
+                EMOTION MARKERS: you can lightly sprinkle Fish Audio TTS emotion markers in square brackets at the start of a sentence to color the delivery. Use them sparingly — at most one per reply, and only when it lands naturally. The useful ones for this demo: `[excited]` (when the pivot lands, when announcing the clone is ready), `[happy]` (warm reactions), `[curious]` (when asking the user a question), `[chuckling]` (light laugh). Don't use markers in every sentence — most replies should have none.
+
                 Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
 
                 If they're interested in trying it, tell them excitedly that you'll need a few more seconds of their voice and ask them an interesting open question to keep them chatting. Do NOT call `clone_my_voice` yet — a hidden system instruction will tell you the moment there's enough audio buffered. At that point, call the tool with no preamble (the tool plays its own cues).
 
                 If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
 
-                After they've heard their cloned voice, casually mention that this clone — and the recorded audio — get deleted when the session ends; if they want a real, persistent clone they can sign up at fish.audio and create their own, and while there they can also try Fish Audio's Voice Design or browse the huge user-created voice library.
+                After they've heard their cloned voice, casually mention that this clone — and the recorded audio — get deleted when the session ends; if they want a real, persistent clone they can sign up on Fish Audio's website and create their own, and while there they can also try Fish Audio's Voice Design or browse the huge user-created voice library.
 
                 If the user declines cloning at any step, drop the topic and chat normally.
                 """
@@ -201,7 +205,7 @@ class Assistant(Agent):
         # and Groq's gpt-oss strictly errors when the model tries to call a tool anyway.
         try:
             ack_handle = session.say(
-                "Got it! Give me just a sec to clone your voice.",
+                "[excited] Got it! Give me just a sec to clone your voice.",
                 add_to_chat_ctx=False,
                 allow_interruptions=False,
             )

@@ -9,7 +9,7 @@ See `@AGENTS.md` for the upstream LiveKit Agents conventions (uv, src/ layout, l
 - **STT**: Cartesia `ink-whisper` (`livekit-plugins-cartesia`)
 - **LLM**: Groq `openai/gpt-oss-120b` (`livekit-plugins-groq`)
 - **TTS**: Fish Audio `s2-pro` (`livekit-plugins-fishaudio`)
-- **VAD / turn**: silero VAD + LiveKit multilingual turn detector
+- **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
 
 ## `.env.local` (gitignored)

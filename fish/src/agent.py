@@ -18,7 +18,6 @@ from livekit.agents import (
     function_tool,
 )
 from livekit.plugins import cartesia, fishaudio, groq, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -299,7 +298,8 @@ async def my_agent(ctx: JobContext):
     session = AgentSession(
         stt=cartesia.STT(model="ink-whisper", language="en"),
         tts=fishaudio.TTS(),
-        turn_detection=MultilingualModel(),
+        # Turn detection falls back to silero VAD — keeps the agent footprint
+        # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )

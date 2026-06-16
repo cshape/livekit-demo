@@ -52,7 +52,7 @@ class Assistant(Agent):
 
                 Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
 
-                If they're interested in trying it, tell them excitedly that you'll need a few more seconds of their voice and ask them an interesting open question to keep them chatting. Do NOT call `clone_my_voice` yet — a hidden system instruction will tell you the moment there's enough audio buffered. At that point, call the tool with no preamble (the tool plays its own cues).
+                If they're interested in trying it, tell them excitedly that you'll need a few more seconds of their voice and ask them an interesting open question to keep them chatting. NEVER call `clone_my_voice` on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
 
                 If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
 
@@ -188,6 +188,20 @@ class Assistant(Agent):
             return (
                 "Apologize briefly and tell the user there isn't enough of their "
                 "voice captured yet — just keep chatting normally for a bit."
+            )
+
+        if not self._capture_ready:
+            logger.warning(
+                "clone_my_voice called before capture threshold (~%.1fs cumulative speech, "
+                "%.1fs buffered) — refusing",
+                self._cumulative_speech_secs,
+                self._capture.buffered_secs,
+            )
+            return (
+                "You called clone_my_voice too early — there isn't enough of the user's voice "
+                "buffered yet. Apologize lightly, tell them you need a few more seconds of their "
+                "voice, and ask them another open question to keep them chatting. Do NOT call "
+                "clone_my_voice again until the hidden system instruction tells you to."
             )
 
         # Snapshot so further capture can't mutate what we upload.

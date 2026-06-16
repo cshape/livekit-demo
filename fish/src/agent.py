@@ -354,7 +354,11 @@ async def my_agent(ctx: JobContext):
 
     session = AgentSession(
         stt=cartesia.STT(model="ink-whisper", language="en"),
-        tts=fishaudio.TTS(voice_id="10b2254869cf4340bdb801928e2fc88e"),
+        tts=fishaudio.TTS(
+            model="s2.1-pro",
+            voice_id="10b2254869cf4340bdb801928e2fc88e",
+            latency_mode="low",
+        ),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],

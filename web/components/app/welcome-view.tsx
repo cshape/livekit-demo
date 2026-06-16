@@ -14,7 +14,7 @@ export const WelcomeView = ({
     <div ref={ref}>
       <section className="bg-background flex flex-col items-center justify-center text-center">
         <h1 className="text-foreground max-w-prose text-3xl leading-tight font-semibold tracking-tight md:text-4xl">
-          Experience cutting-edge voice cloning
+          Experience cutting-edge voice cloning with Fish Audio
         </h1>
 
         <Button

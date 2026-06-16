@@ -281,9 +281,13 @@ class Assistant(Agent):
         logger.info("switched TTS to cloned voice id=%s", self._cloned_voice_id)
         await self._set_clone_state("playing")
         return (
-            "Voice switched. This first reply in their new voice should be two warm, "
-            "natural sentences (a touch longer than your usual single-sentence replies) "
-            "so they really hear it. After this one reply, go back to single-sentence answers."
+            "Voice switched. Your next reply is the first thing they'll hear in the cloned voice. "
+            "Make it two short sentences from YOUR perspective as the assistant — not as the user. "
+            "First sentence: a quick warm greeting like 'Hey, hi!'. "
+            "Second sentence: ask how the cloned voice sounds, e.g. 'So, how does this sound — what do you think?'. "
+            "Do NOT pretend to be the user discovering their own voice. Do NOT say things like "
+            "'I'm thrilled to hear my own voice' or 'it sounds just like me'. "
+            "After this one reply, go back to single-sentence answers."
         )
 
 

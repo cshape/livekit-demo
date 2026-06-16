@@ -19,7 +19,7 @@ services:
     runtime: node
     rootDir: web
     plan: free
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
     startCommand: pnpm start
     autoDeploy: true
     envVars:

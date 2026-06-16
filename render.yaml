@@ -37,6 +37,17 @@ services:
     autoDeploy: true
     envVars:
       - fromGroup: livekit-demo-shared
+      # Render only persists files under /opt/render/project/src/ between build
+      # and runtime. The HF / torch caches default to $HOME/.cache, which sits
+      # outside that tree and gets wiped — so the silero VAD + turn-detector
+      # weights downloaded at build time vanish before `start`. Pin both caches
+      # inside the project tree so they survive.
+      - key: HF_HOME
+        value: /opt/render/project/src/fish/.cache/huggingface
+      - key: TORCH_HOME
+        value: /opt/render/project/src/fish/.cache/torch
+      - key: XDG_CACHE_HOME
+        value: /opt/render/project/src/fish/.cache
 
 envVarGroups:
   - name: livekit-demo-shared

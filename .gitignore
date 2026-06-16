@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+
+# Editor / tool local state
+.idea/
+.vscode/
+.claude/settings.local.json
+.claude/worktrees/
+
+# Belt-and-suspenders for env files — each subproject has its own .gitignore
+# that excludes .env.local, but cover the top level too just in case.
+.env
+.env.*
+!.env.example

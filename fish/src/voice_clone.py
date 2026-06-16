@@ -1,0 +1,198 @@
+import asyncio
+import io
+import json
+import logging
+import wave
+
+import aiohttp
+from livekit import rtc
+from livekit.agents import AgentSession, stt, vad
+from livekit.agents.voice.io import AudioInput
+
+logger = logging.getLogger("voice_clone")
+
+FISH_BASE_URL = "https://api.fish.audio"
+
+
+class _CaptureAndMuteAudioInput(AudioInput):
+    """Pulls frames from the underlying source for voice-clone capture, and yields
+    silent frames of the same shape to the session pipeline so STT/turn-detection
+    don't transcribe the user's monologue back into the conversation."""
+
+    def __init__(self, source: AudioInput) -> None:
+        super().__init__(label="voice-clone-capture", source=source)
+        self.frames: list[rtc.AudioFrame] = []
+
+    async def __anext__(self) -> rtc.AudioFrame:
+        frame = await super().__anext__()
+        self.frames.append(frame)
+        nbytes = frame.samples_per_channel * frame.num_channels * 2  # int16
+        return rtc.AudioFrame(
+            data=b"\x00" * nbytes,
+            sample_rate=frame.sample_rate,
+            num_channels=frame.num_channels,
+            samples_per_channel=frame.samples_per_channel,
+        )
+
+
+async def record_session_audio(
+    session: AgentSession, duration_secs: float = 15.0
+) -> list[rtc.AudioFrame]:
+    original = session.input.audio
+    if original is None:
+        raise RuntimeError("session has no audio input")
+
+    tee = _CaptureAndMuteAudioInput(source=original)
+    session.input.audio = tee
+    try:
+        await asyncio.sleep(duration_secs)
+    finally:
+        session.input.audio = original
+
+    if not tee.frames:
+        raise RuntimeError("no audio frames captured during recording window")
+
+    return tee.frames
+
+
+async def vad_trim_frames(
+    vad_model: vad.VAD, frames: list[rtc.AudioFrame]
+) -> list[rtc.AudioFrame]:
+    """Run frames through silero VAD and return only the frames inside speech segments.
+
+    Pads the input with ~1s of silence so END_OF_SPEECH fires even if the user was
+    still talking at the moment recording ended. Falls back to the original frames
+    if VAD detected no speech."""
+    if not frames:
+        return frames
+
+    last = frames[-1]
+    silence = rtc.AudioFrame(
+        data=b"\x00" * last.samples_per_channel * last.num_channels * 2,
+        sample_rate=last.sample_rate,
+        num_channels=last.num_channels,
+        samples_per_channel=last.samples_per_channel,
+    )
+    frame_secs = last.samples_per_channel / last.sample_rate
+    pad_count = max(1, int(1.0 / frame_secs))
+    padded = frames + [silence] * pad_count
+
+    stream = vad_model.stream()
+
+    async def push() -> None:
+        for f in padded:
+            stream.push_frame(f)
+        stream.end_input()
+
+    push_task = asyncio.create_task(push())
+
+    speech_frames: list[rtc.AudioFrame] = []
+    try:
+        async for ev in stream:
+            if ev.type == vad.VADEventType.END_OF_SPEECH:
+                speech_frames.extend(ev.frames)
+    finally:
+        await push_task
+        await stream.aclose()
+
+    if not speech_frames:
+        logger.warning("VAD detected no speech in capture; sending raw frames")
+        return frames
+
+    return speech_frames
+
+
+async def transcribe_frames(
+    stt_model: stt.STT, frames: list[rtc.AudioFrame]
+) -> str:
+    """Stream the given frames through an STT instance and return the joined final transcript."""
+    stream = stt_model.stream()
+
+    async def push() -> None:
+        for f in frames:
+            stream.push_frame(f)
+        stream.end_input()
+
+    push_task = asyncio.create_task(push())
+
+    parts: list[str] = []
+    try:
+        async for ev in stream:
+            if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+                for alt in ev.alternatives:
+                    if alt.text:
+                        parts.append(alt.text)
+    finally:
+        await push_task
+        await stream.aclose()
+
+    return " ".join(parts).strip()
+
+
+def frames_to_wav(frames: list[rtc.AudioFrame]) -> bytes:
+    sample_rate = frames[0].sample_rate
+    num_channels = frames[0].num_channels
+
+    pcm = bytearray()
+    for f in frames:
+        pcm.extend(bytes(f.data.cast("B")))
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(num_channels)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(bytes(pcm))
+    return buf.getvalue()
+
+
+async def create_voice_clone(
+    api_key: str,
+    wav_bytes: bytes,
+    *,
+    title: str,
+    transcript: str | None = None,
+) -> str:
+    form = aiohttp.FormData()
+    form.add_field("type", "tts")
+    form.add_field("title", title)
+    form.add_field("train_mode", "fast")
+    form.add_field("visibility", "private")
+    form.add_field("enhance_audio_quality", "true")
+    if transcript:
+        form.add_field("texts", transcript)
+    form.add_field(
+        "voices",
+        wav_bytes,
+        filename="reference.wav",
+        content_type="audio/wav",
+    )
+
+    async with (
+        aiohttp.ClientSession() as session,
+        session.post(
+            f"{FISH_BASE_URL}/model",
+            headers={"Authorization": f"Bearer {api_key}"},
+            data=form,
+        ) as resp,
+    ):
+        body = await resp.text()
+        if resp.status >= 400:
+            raise RuntimeError(f"Fish create-model failed: {resp.status} {body}")
+        return json.loads(body)["_id"]
+
+
+async def delete_voice_clone(api_key: str, model_id: str) -> None:
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.delete(
+                f"{FISH_BASE_URL}/model/{model_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as resp,
+        ):
+            if resp.status >= 400:
+                body = await resp.text()
+                logger.warning("Fish delete-model failed: %s %s", resp.status, body)
+    except Exception as e:
+        logger.warning("Fish delete-model raised: %s", e)

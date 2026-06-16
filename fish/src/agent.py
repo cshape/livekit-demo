@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import os
@@ -8,6 +9,8 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    ChatContext,
+    ChatMessage,
     JobContext,
     JobProcess,
     RunContext,
@@ -18,16 +21,22 @@ from livekit.plugins import cartesia, fishaudio, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from voice_clone import (
+    PassthroughCaptureAudioInput,
     create_voice_clone,
     delete_voice_clone,
     frames_to_wav,
-    record_session_audio,
     transcribe_frames,
     vad_trim_frames,
 )
 
 logger = logging.getLogger("agent")
 load_dotenv(".env.local")
+
+# Cumulative seconds of user speech before the agent has enough audio to clone.
+CLONE_PITCH_THRESHOLD_SECS = 10.0
+# Hard cap on buffered audio that gets uploaded to Fish. Long recordings get
+# truncated to the first CAPTURE_MAX_SECS of speech.
+CAPTURE_MAX_SECS = 60.0
 
 
 class Assistant(Agent):
@@ -36,87 +45,161 @@ class Assistant(Agent):
             llm=groq.LLM(model="openai/gpt-oss-120b"),
             instructions=textwrap.dedent(
                 """
-                You are a friendly, reliable voice assistant.
-                1-2 sentences max and use disfluencies and other mistakes to sound like a natural person speaking off the cuff.
+                You are a friendly voice assistant demoing Fish Audio's voice cloning. Keep replies to 1-2 short sentences with natural disfluencies so you sound off-the-cuff.
 
-                Early in the conversation, ask the user if they've ever cloned their voice before — pitch it as fun and easy.
-                If they want to try it, tell them they'll need to talk continuously for about 15 seconds (any topic), and ask if they're ready.
-                When they say they're ready, in the SAME turn:
-                  - say one or two short casual sentences that (a) tell them to speak for about fifteen seconds about anything they want, (b) reassure them you'll holler when you've got enough audio, and (c) end with a clear "go" cue. Example feel: "OK — speak for about fifteen seconds about whatever you want, and I'll holler when I've got enough. Go ahead!"
-                  - call the `clone_my_voice` tool
-                The tool starts recording the instant your spoken sentence finishes, so don't pad it.
-                The tool handles recording and uploading and only returns once the clone is fully ready. Follow its return instruction exactly — usually that means asking the user in one short, excited sentence if they want to hear their cloned voice.
-                If the user agrees to hear it, call `play_cloned_voice`. If they decline, drop the topic and keep chatting in your normal voice.
+                Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
+
+                If they're interested in trying it, tell them excitedly that you'll need a few more seconds of their voice and ask them an interesting open question to keep them chatting. Do NOT call `clone_my_voice` yet — a hidden system instruction will tell you the moment there's enough audio buffered. At that point, call the tool with no preamble (the tool plays its own cues).
+
+                If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
+
+                After they've heard their cloned voice, casually mention that this clone — and the recorded audio — get deleted when the session ends; if they want a real, persistent clone they can sign up at fish.audio and create their own, and while there they can also try Fish Audio's Voice Design or browse the huge user-created voice library.
+
                 If the user declines cloning at any step, drop the topic and chat normally.
                 """
             ),
         )
         self._cloned_voice_id: str | None = None
         self._job_ctx: JobContext | None = None
+        self._capture: PassthroughCaptureAudioInput | None = None
+        self._cumulative_speech_secs: float = 0.0
+        self._speech_started_at: float | None = None
+        self._capture_ready: bool = False
+        self._pitch_done: bool = False
+        # Keep strong refs to fire-and-forget attribute pushes so the event loop
+        # doesn't GC them mid-flight.
+        self._bg_tasks: set[asyncio.Task[None]] = set()
 
-    async def _set_clone_state(self, state: str) -> None:
-        """Push the cloning state to the room participant attributes so the frontend
-        UI can show recording / cloning / ready / playing indicators.
+    async def _set_clone_attrs(self, **values: str) -> None:
+        """Push one or more `clone.*` participant attributes to the room.
 
         IMPORTANT: livekit-rtc's `set_attributes` has a bug — it builds the outgoing
         attribute set from a fresh empty FfiRequest instead of reading the current
-        attributes, so it clobbers everything not in the dict you pass. We have to
-        re-send `lk.agent.state` (managed by the Agents SDK) and any other keys
-        ourselves, or the frontend's `useAgent` hook flips to `state==="failed"`
-        and `useAgentErrors` kills the session.
+        attributes, so it clobbers everything not in the dict you pass. We re-send
+        every existing attribute (including `lk.agent.state` managed by the Agents
+        SDK), or the frontend's `useAgent` hook flips to `state==="failed"` and
+        `useAgentErrors` kills the session.
         """
         if self._job_ctx is None:
             return
         try:
             participant = self._job_ctx.room.local_participant
             merged = dict(participant.attributes)
-            merged["clone.state"] = state
+            for key, value in values.items():
+                merged[f"clone.{key}"] = value
             await participant.set_attributes(merged)
         except Exception:
-            logger.exception("failed to set clone.state=%s", state)
+            logger.exception("failed to set clone attrs: %s", values)
+
+    async def _set_clone_state(self, state: str) -> None:
+        await self._set_clone_attrs(state=state)
+
+    def install_capture(self, session: AgentSession) -> None:
+        """Swap a passthrough capture tee onto session.input.audio and wire
+        user-speaking state changes so we know how much speech we've buffered."""
+        original = session.input.audio
+        if original is None:
+            logger.warning("session has no audio input; voice-clone capture disabled")
+            return
+        tee = PassthroughCaptureAudioInput(source=original, max_secs=CAPTURE_MAX_SECS)
+        session.input.audio = tee
+        self._capture = tee
+
+        def _on_user_state_changed(ev) -> None:
+            if ev.new_state == "speaking":
+                self._speech_started_at = ev.created_at
+                tee.recording = True
+                return
+
+            tee.recording = False
+            if self._speech_started_at is not None:
+                delta = ev.created_at - self._speech_started_at
+                if delta > 0:
+                    self._cumulative_speech_secs += delta
+                self._speech_started_at = None
+
+            if (
+                not self._capture_ready
+                and self._cumulative_speech_secs >= CLONE_PITCH_THRESHOLD_SECS
+            ):
+                self._capture_ready = True
+                logger.info(
+                    "voice-clone capture ready (~%.1fs cumulative speech, %.1fs buffered)",
+                    self._cumulative_speech_secs,
+                    tee.buffered_secs,
+                )
+
+            # Push the updated capture-seconds attribute so the frontend progress
+            # bar advances. Cheap: one attribute write per user-turn boundary.
+            task = asyncio.create_task(
+                self._set_clone_attrs(
+                    capture_secs=f"{self._cumulative_speech_secs:.2f}"
+                )
+            )
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+
+        session.on("user_state_changed", _on_user_state_changed)
+
+    async def on_user_turn_completed(
+        self, turn_ctx: ChatContext, new_message: ChatMessage
+    ) -> None:
+        """Inject a one-shot pivot-to-cloning instruction once we have enough audio.
+
+        Done here (rather than via a background task that calls generate_reply)
+        so the pitch rides the normal next-response cycle and can't interrupt
+        the user mid-turn."""
+        if (
+            self._capture_ready
+            and not self._pitch_done
+            and self._cloned_voice_id is None
+        ):
+            self._pitch_done = True
+            turn_ctx.add_message(
+                role="system",
+                content=(
+                    "There is now enough of the user's voice buffered to actually clone it. "
+                    "If the user has already agreed to try voice cloning earlier in the conversation, "
+                    "call `clone_my_voice` right now with no preamble. "
+                    "Otherwise, briefly acknowledge what they just said and, in the same short "
+                    "sentence, offer to clone their voice right now."
+                ),
+            )
+            logger.info("injected voice-clone pivot instruction into turn_ctx")
 
     @function_tool
     async def clone_my_voice(self, context: RunContext) -> str:
-        """Record ~15 seconds of the user's voice, upload to Fish Audio, and only return once the clone is ready.
+        """Upload the user's voice (already buffered from the conversation so far) to
+        Fish Audio and only return once the clone is ready.
 
-        Call this only after the user has confirmed they're ready to speak continuously.
-        IMPORTANT: in the same turn you call this tool, you MUST also speak a 1-2 sentence
-        cue that tells the user to speak for ~15 seconds and that you'll holler when you've
-        got enough audio. Recording starts the instant your spoken cue finishes.
-        The tool plays a short "got it!" interrupt when the recording ends, blocks while
-        the upload runs, and returns with instructions for you to ask if they want to hear
-        their new voice.
+        Call this only after the user has agreed to try the voice clone — the agent
+        speaks no preamble. The tool plays a short "got it!" cue to fill the upload
+        window, blocks while the upload runs, and returns with instructions for you
+        to ask if they want to hear their new voice.
         """
         session = context.session
         api_key = os.environ["FISH_API_KEY"]
 
-        # No start cue here — the LLM already said "go!" as part of the same turn
-        # that called this tool (per system instructions). Start recording immediately.
-        await self._set_clone_state("recording")
+        if self._capture is None or not self._capture.frames:
+            logger.warning("clone_my_voice called but no buffered audio")
+            return (
+                "Apologize briefly and tell the user there isn't enough of their "
+                "voice captured yet — just keep chatting normally for a bit."
+            )
 
-        try:
-            frames = await record_session_audio(session, duration_secs=15.0)
-        except Exception as e:
-            logger.exception("voice recording failed")
-            await self._set_clone_state("idle")
-            return f"Recording failed: {e}. Tell the user something went wrong and offer to retry."
+        # Snapshot so further capture can't mutate what we upload.
+        frames = list(self._capture.frames)
+        logger.info(
+            "starting clone: %d frames (~%.1fs buffered)",
+            len(frames),
+            self._capture.buffered_secs,
+        )
 
-        # If the user disconnected mid-recording, the session is closing — bail
-        # before we waste time/money on Fish and crash on session.say().
-        if session._activity is None:
-            logger.info("session closed mid-recording; aborting clone flow")
-            await self._set_clone_state("idle")
-            return "Session ended before cloning finished."
-
-        # Discard any pending user turn so the buffered monologue doesn't trigger another tool call.
-        session.clear_user_turn()
         await self._set_clone_state("cloning")
 
         # Short verbatim acknowledgment to fill the upload window. Verbatim (not
         # generate_reply) because generate_reply inside a tool sets tool_choice="none"
-        # and Groq's gpt-oss strictly errors when the model tries to call a tool
-        # anyway. allow_interruptions=False so the user — who may still be talking
-        # from the monologue — can't bury it.
+        # and Groq's gpt-oss strictly errors when the model tries to call a tool anyway.
         try:
             ack_handle = session.say(
                 "Got it! Give me just a sec to clone your voice.",
@@ -143,7 +226,9 @@ class Assistant(Agent):
             if transcript:
                 logger.info("reference transcript: %s", transcript)
         except Exception:
-            logger.exception("STT for reference transcript failed; uploading without texts")
+            logger.exception(
+                "STT for reference transcript failed; uploading without texts"
+            )
         finally:
             await transcript_stt.aclose()
 
@@ -194,6 +279,7 @@ class Assistant(Agent):
         await self._set_clone_state("playing")
         return "Voice switched. Say something short and warm so the user hears their new voice."
 
+
 server = AgentServer()
 
 
@@ -237,11 +323,15 @@ async def my_agent(ctx: JobContext):
         room=ctx.room,
     )
 
-    # Open the conversation — agent greets and immediately pitches the cloning demo.
+    # Tee the mic so we silently buffer user audio for a later voice clone.
+    assistant.install_capture(session)
+
+    # Open the conversation — agent greets and puts voice cloning on the table.
+    # The actual clone is triggered later, once enough of the user's voice is buffered.
     session.generate_reply(
         instructions=(
-            "Greet the user warmly in one short, casual sentence and ask if they "
-            "want to try cloning their voice — mention it only takes about fifteen seconds."
+            "Greet the user casually in one short sentence and ask if they've "
+            "ever tried voice cloning before."
         ),
     )
 

@@ -1,0 +1,57 @@
+# Render Blueprint: two services, one repo, no Docker.
+#
+# Setup (one time):
+#   1. Push this repo to GitHub.
+#   2. In the Render dashboard: New → Blueprint → pick this repo.
+#      Render reads render.yaml and offers to create both services.
+#   3. Fill in the env-var group `livekit-demo-shared` with your real keys.
+#      (Same values you have in fish/.env.local and web/.env.local.)
+#
+# Plans: the web service runs on the free tier (sleeps after 15 min idle).
+# Render workers have no free tier — `livekit-demo-agent` runs on Starter (~$7/mo).
+# If that's a blocker, fly.io or railway.app are cheaper alternatives for the worker.
+
+services:
+  # Next.js frontend: serves the landing page + the /api/token route that mints
+  # LiveKit access tokens.
+  - type: web
+    name: livekit-demo-web
+    runtime: node
+    rootDir: web
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    autoDeploy: true
+    envVars:
+      - fromGroup: livekit-demo-shared
+
+  # Python agent worker: registers with LiveKit Cloud and gets dispatched into
+  # rooms as users join. No inbound port.
+  - type: worker
+    name: livekit-demo-agent
+    runtime: python
+    rootDir: fish
+    plan: starter
+    buildCommand: pip install uv && uv sync --frozen && uv run python src/agent.py download-files
+    startCommand: uv run python src/agent.py start
+    autoDeploy: true
+    envVars:
+      - fromGroup: livekit-demo-shared
+
+envVarGroups:
+  - name: livekit-demo-shared
+    envVars:
+      # LiveKit Cloud project (both services connect to the same one).
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      # Provider API keys (worker-only, but harmless on web).
+      - key: CARTESIA_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FISH_API_KEY
+        sync: false

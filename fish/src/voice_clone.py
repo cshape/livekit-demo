@@ -6,7 +6,7 @@ import wave
 
 import aiohttp
 from livekit import rtc
-from livekit.agents import AgentSession, stt, vad
+from livekit.agents import stt, vad
 from livekit.agents.voice.io import AudioInput
 
 logger = logging.getLogger("voice_clone")
@@ -14,45 +14,35 @@ logger = logging.getLogger("voice_clone")
 FISH_BASE_URL = "https://api.fish.audio"
 
 
-class _CaptureAndMuteAudioInput(AudioInput):
-    """Pulls frames from the underlying source for voice-clone capture, and yields
-    silent frames of the same shape to the session pipeline so STT/turn-detection
-    don't transcribe the user's monologue back into the conversation."""
+class PassthroughCaptureAudioInput(AudioInput):
+    """Passes every frame through to the session pipeline unchanged, and (when
+    `recording` is True) also appends a copy into `frames` for later voice cloning.
 
-    def __init__(self, source: AudioInput) -> None:
-        super().__init__(label="voice-clone-capture", source=source)
+    The buffer is hard-capped at `max_secs` of buffered audio — frames pulled
+    after the cap are still forwarded to the pipeline but not appended, so a
+    runaway-long session can't blow memory and the eventual upload is bounded."""
+
+    def __init__(self, source: AudioInput, max_secs: float = 60.0) -> None:
+        super().__init__(label="voice-clone-passthrough", source=source)
         self.frames: list[rtc.AudioFrame] = []
+        self.max_secs = max_secs
+        self.recording = False
+        self._buffered_secs = 0.0
+
+    @property
+    def buffered_secs(self) -> float:
+        return self._buffered_secs
+
+    @property
+    def is_full(self) -> bool:
+        return self._buffered_secs >= self.max_secs
 
     async def __anext__(self) -> rtc.AudioFrame:
         frame = await super().__anext__()
-        self.frames.append(frame)
-        nbytes = frame.samples_per_channel * frame.num_channels * 2  # int16
-        return rtc.AudioFrame(
-            data=b"\x00" * nbytes,
-            sample_rate=frame.sample_rate,
-            num_channels=frame.num_channels,
-            samples_per_channel=frame.samples_per_channel,
-        )
-
-
-async def record_session_audio(
-    session: AgentSession, duration_secs: float = 15.0
-) -> list[rtc.AudioFrame]:
-    original = session.input.audio
-    if original is None:
-        raise RuntimeError("session has no audio input")
-
-    tee = _CaptureAndMuteAudioInput(source=original)
-    session.input.audio = tee
-    try:
-        await asyncio.sleep(duration_secs)
-    finally:
-        session.input.audio = original
-
-    if not tee.frames:
-        raise RuntimeError("no audio frames captured during recording window")
-
-    return tee.frames
+        if self.recording and not self.is_full:
+            self.frames.append(frame)
+            self._buffered_secs += frame.samples_per_channel / frame.sample_rate
+        return frame
 
 
 async def vad_trim_frames(
@@ -102,9 +92,7 @@ async def vad_trim_frames(
     return speech_frames
 
 
-async def transcribe_frames(
-    stt_model: stt.STT, frames: list[rtc.AudioFrame]
-) -> str:
+async def transcribe_frames(stt_model: stt.STT, frames: list[rtc.AudioFrame]) -> str:
     """Stream the given frames through an STT instance and return the joined final transcript."""
     stream = stt_model.stream()
 

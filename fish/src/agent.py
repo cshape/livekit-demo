@@ -52,7 +52,7 @@ class Assistant(Agent):
 
                 Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
 
-                If they're interested in trying it, tell them excitedly that you'll need a few more seconds of their voice and ask them an interesting open question to keep them chatting. NEVER call `clone_my_voice` on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
+                If they're interested in trying it, tell them excitedly that you're already collecting their voice as you chat, and ask them an interesting open question to keep them talking. A hidden system message will tell you on every turn how many seconds of their voice have been buffered out of 10 — use that to phrase progress naturally ("almost there", "just a bit more") instead of repeating yourself. NEVER call `clone_my_voice` on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
 
                 If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
 
@@ -69,6 +69,10 @@ class Assistant(Agent):
         self._speech_started_at: float | None = None
         self._capture_ready: bool = False
         self._pitch_done: bool = False
+        # Track the last injected capture-status system message so we can drop
+        # it on the next turn — keeps the LLM seeing exactly one current value
+        # instead of a growing log of stale numbers.
+        self._status_msg_id: str | None = None
         # Keep strong refs to fire-and-forget attribute pushes so the event loop
         # doesn't GC them mid-flight.
         self._bg_tasks: set[asyncio.Task[None]] = set()
@@ -147,28 +151,55 @@ class Assistant(Agent):
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
     ) -> None:
-        """Inject a one-shot pivot-to-cloning instruction once we have enough audio.
+        """Each user turn, refresh a one-line capture-status note in the chat
+        context so the LLM knows exactly how much voice has been buffered. Once
+        the buffer crosses threshold, swap the status for a one-shot pivot
+        instruction that tells the LLM to call `clone_my_voice`.
 
         Done here (rather than via a background task that calls generate_reply)
-        so the pitch rides the normal next-response cycle and can't interrupt
-        the user mid-turn."""
-        if (
-            self._capture_ready
-            and not self._pitch_done
-            and self._cloned_voice_id is None
-        ):
-            self._pitch_done = True
-            turn_ctx.add_message(
+        so anything we inject rides the normal next-response cycle and can't
+        interrupt the user mid-turn."""
+        # Drop the previous capture-status message so the LLM only ever sees the
+        # latest value, not a stack of stale numbers.
+        if self._status_msg_id is not None:
+            try:
+                idx = turn_ctx.index_by_id(self._status_msg_id)
+                if idx is not None:
+                    turn_ctx.items.pop(idx)
+            except Exception:
+                logger.exception("failed to drop previous capture-status message")
+            self._status_msg_id = None
+
+        # Nothing more to inject once we've already pitched.
+        if self._pitch_done or self._cloned_voice_id is not None:
+            return
+
+        if not self._capture_ready:
+            msg = turn_ctx.add_message(
                 role="system",
                 content=(
-                    "There is now enough of the user's voice buffered to actually clone it. "
-                    "If the user has already agreed to try voice cloning earlier in the conversation, "
-                    "call `clone_my_voice` right now with no preamble. "
-                    "Otherwise, briefly acknowledge what they just said and, in the same short "
-                    "sentence, offer to clone their voice right now."
+                    f"Voice-capture status: ~{self._cumulative_speech_secs:.1f}s of the "
+                    f"user's voice has been buffered. {CLONE_PITCH_THRESHOLD_SECS:.0f}s "
+                    "is needed before the clone can be made. Use this number naturally if "
+                    "you talk about progress (e.g. 'we're about halfway there'), but don't "
+                    "read it out as a literal stat."
                 ),
             )
-            logger.info("injected voice-clone pivot instruction into turn_ctx")
+            self._status_msg_id = msg.id
+            return
+
+        self._pitch_done = True
+        turn_ctx.add_message(
+            role="system",
+            content=(
+                "There is now enough of the user's voice buffered to actually clone it. "
+                "If the user has already agreed to try voice cloning earlier in the conversation, "
+                "call `clone_my_voice` right now with no preamble. "
+                "Otherwise, briefly acknowledge what they just said and, in the same short "
+                "sentence, offer to clone their voice right now."
+            ),
+        )
+        logger.info("injected voice-clone pivot instruction into turn_ctx")
 
     @function_tool
     async def clone_my_voice(self, context: RunContext) -> str:
@@ -323,7 +354,7 @@ async def my_agent(ctx: JobContext):
 
     session = AgentSession(
         stt=cartesia.STT(model="ink-whisper", language="en"),
-        tts=fishaudio.TTS(voice_id="59e9dc1cb20c452584788a2690c80970"),
+        tts=fishaudio.TTS(voice_id="10b2254869cf4340bdb801928e2fc88e"),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],

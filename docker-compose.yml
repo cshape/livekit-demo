@@ -1,0 +1,27 @@
+# Run the whole demo (frontend + agent worker) with one command:
+#
+#   cp .env.example .env   # then fill in your keys
+#   docker compose up --build
+#
+# Then open http://localhost:3000.
+#
+# Both containers and your browser connect to the same LiveKit Cloud project
+# (set LIVEKIT_URL etc. in .env). They meet in a room dispatched by the web
+# app's /api/token route — the two services never talk to each other directly.
+#
+# To run just one half, target it: `docker compose up --build web` or
+# `docker compose up --build agent`. To run a half outside Docker instead,
+# see fish/README.md and web/README.md.
+
+services:
+  agent:
+    build: ./fish
+    env_file: .env
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    env_file: .env
+    ports:
+      - '3000:3000'
+    restart: unless-stopped

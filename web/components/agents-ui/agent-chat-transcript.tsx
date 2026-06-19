@@ -10,6 +10,7 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
+import { FishCta } from '@/components/app/fish-cta';
 
 // Strip Fish Audio [emotion] markers (e.g. "[excited] Got it!") so they
 // don't render in the chat transcript — they're TTS-only and look like noise
@@ -19,6 +20,14 @@ function stripEmotionTags(text: string): string {
     .replace(/\[[^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// The agent speaks the website as "fish dot audio" so the TTS pronounces the
+// domain correctly. In the transcript we turn that (and any stray "fish.audio")
+// into a clickable, correctly-spelled fish.audio link.
+const FISH_URL = 'https://fish.audio?utm_source=livekit-demo';
+function linkifyFishAudio(text: string): string {
+  return text.replace(/\bfish(?:\s+dot\s+|\.)audio\b/gi, `[fish.audio](${FISH_URL})`);
 }
 
 /**
@@ -74,11 +83,15 @@ export function AgentChatTranscript({
           return (
             <Message key={id} title={title} from={messageOrigin}>
               <MessageContent>
-                <MessageResponse>{stripEmotionTags(message)}</MessageResponse>
+                <MessageResponse className="[&_a]:font-medium [&_a]:text-sky-500 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-sky-400">
+                  {linkifyFishAudio(stripEmotionTags(message))}
+                </MessageResponse>
               </MessageContent>
             </Message>
           );
         })}
+        {/* Stylized sign-up CTA — self-gates to appear once the voice has switched. */}
+        <FishCta />
         <AnimatePresence>
           {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
         </AnimatePresence>

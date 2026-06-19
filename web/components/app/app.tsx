@@ -8,16 +8,22 @@ import type { AppConfig } from '@/app-config';
 import { AgentSessionProvider } from '@/components/agents-ui/agent-session-provider';
 import { StartAudioButton } from '@/components/agents-ui/start-audio-button';
 import { CloneStatusBanner } from '@/components/app/clone-status-banner';
+import { DebugPanel } from '@/components/app/debug-panel';
 import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
-import { useDebugMode } from '@/hooks/useDebug';
+import { useDebugLogCapture, useDebugMode } from '@/hooks/useDebug';
+import { useDebugState } from '@/lib/debug-store';
 import { getSandboxTokenSource } from '@/lib/utils';
 
 const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
 
 function AppSetup() {
-  useDebugMode({ enabled: IN_DEVELOPMENT });
+  const { enabled: debugEnabled } = useDebugState();
+  // Raise LiveKit log verbosity whenever the debug overlay is open (or in dev),
+  // and tee those logs into the debug buffer.
+  useDebugMode({ enabled: IN_DEVELOPMENT || debugEnabled });
+  useDebugLogCapture(true);
   useAgentErrors();
 
   return null;
@@ -46,6 +52,7 @@ export function App({ appConfig }: AppProps) {
         <ViewController appConfig={appConfig} />
       </main>
       <CloneStatusBanner />
+      <DebugPanel />
       <StartAudioButton label="Start Audio" />
       <Toaster
         icons={{

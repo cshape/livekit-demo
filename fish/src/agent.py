@@ -17,7 +17,7 @@ from livekit.agents import (
     cli,
     function_tool,
 )
-from livekit.plugins import cartesia, fishaudio, groq, silero
+from livekit.plugins import cartesia, fishaudio, openai, silero
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -41,7 +41,10 @@ CAPTURE_MAX_SECS = 60.0
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            llm=groq.LLM(model="openai/gpt-oss-120b"),
+            # OpenAI (was Groq's gpt-oss-120b, whose free-tier 8k TPM limit
+            # throttled the demo). Model is env-overridable so the exact id can be
+            # swapped without a code change.
+            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-nano")),
             instructions=textwrap.dedent(
                 """
                 You are a friendly voice assistant demoing Fish Audio's voice cloning. Default to a single short sentence per reply (one sentence is the norm; two is the absolute max, and only when you genuinely need it). Talk like a real person thinking out loud, and lean HARD into natural disfluency — that imperfection is what sells a real voice, and showing it off is the whole point of this demo. Use contractions, plus, liberally: fillers (um, uh, er, oh, hmm, well, like, you know), hedges (kind of, sort of, a little, I guess, I mean), false starts and mid-sentence self-repairs ("I— I think", "it's, it's kind of like", "wait, no—"), and the occasional light stutter on a word's first sound ("th-this", "y-yeah"). Use these every turn, enough that you genuinely sound mid-thought — but keep them organic and varied, never the same tic every line or sprinkled in mechanically.
@@ -258,7 +261,8 @@ class Assistant(Agent):
 
         # Short verbatim acknowledgment to fill the upload window. Verbatim (not
         # generate_reply) because generate_reply inside a tool sets tool_choice="none"
-        # and Groq's gpt-oss strictly errors when the model tries to call a tool anyway.
+        # (which strictly errored on the old Groq gpt-oss if the model emitted a tool
+        # call anyway — kept as a safe convention now that we're on OpenAI).
         try:
             ack_handle = session.say(
                 "[excited] Got it! Give me just a sec to clone your voice.",

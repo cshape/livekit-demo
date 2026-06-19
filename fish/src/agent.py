@@ -60,7 +60,7 @@ class Assistant(Agent):
 
                 If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
 
-                After they've heard their cloned voice, casually mention that this clone — and the recorded audio — get deleted when the session ends; if they want a real, persistent clone they can head to fish dot audio, sign up, and create their own, and while there they can also try Fish Audio's Voice Design or browse the huge user-created voice library.
+                After they've heard their cloned voice, casually mention that this clone — and the recorded audio — get deleted when the session ends; if they want a real, persistent clone they can head to fish dot audio, sign up, and create their own, and while there they can also try Fish Audio's Voice Design or browse the huge user-created voice library. At this point a clickable "fish.audio" link and a sign-up card also appear on screen — if the user asks for the link, the address, or where to go, tell them it's right there on screen and they can just tap it. Still say the address out loud as "fish dot audio"; never spell out a URL or read it character by character.
 
                 If the user declines cloning at any step, drop the topic and chat normally.
                 """
@@ -366,7 +366,13 @@ async def my_agent(ctx: JobContext):
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
+        # preemptive_generation is intentionally OFF. It starts generating the
+        # reply while the user is still talking — i.e. before
+        # on_user_turn_completed runs — so the capture-status note and (crucially)
+        # the "you're ready, pivot to cloning now" system message we inject there
+        # don't make it into that turn's response. The agent then misses the
+        # moment the buffer crosses threshold and the clone pitch stalls until the
+        # user prods it. Correctness of the injected pivot beats the latency win.
     )
 
     assistant = Assistant()

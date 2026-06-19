@@ -10,7 +10,6 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
-import { FishCta } from '@/components/app/fish-cta';
 
 // Strip Fish Audio [emotion] markers (e.g. "[excited] Got it!") so they
 // don't render in the chat transcript — they're TTS-only and look like noise
@@ -90,8 +89,6 @@ export function AgentChatTranscript({
             </Message>
           );
         })}
-        {/* Stylized sign-up CTA — self-gates to appear once the voice has switched. */}
-        <FishCta />
         <AnimatePresence>
           {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
         </AnimatePresence>

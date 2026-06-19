@@ -15,10 +15,19 @@ import { Message, MessageContent, MessageResponse } from '@/components/ai-elemen
 // don't render in the chat transcript — they're TTS-only and look like noise
 // on screen.
 function stripEmotionTags(text: string): string {
-  return text
-    .replace(/\[[^\]]+\]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    text
+      // Complete [tag] markers.
+      .replace(/\[[^\]]*\]/g, '')
+      // A still-streaming, not-yet-closed tag (e.g. "[speaks warmly" before the
+      // "]" arrives). Without this it briefly renders as raw text — and Streamdown
+      // reads the "[" as the start of a markdown link, flashing it blue — until the
+      // closing bracket lands and the complete-tag rule above removes it. Hide it
+      // from the trailing "[" to end-of-string so nothing flickers mid-stream.
+      .replace(/\[[^\]]*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 // The agent speaks the website as "fish dot audio" so the TTS pronounces the

@@ -7,7 +7,6 @@ import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionProvider } from '@/components/agents-ui/agent-session-provider';
 import { StartAudioButton } from '@/components/agents-ui/start-audio-button';
-import { CloneStatusBanner } from '@/components/app/clone-status-banner';
 import { DebugPanel } from '@/components/app/debug-panel';
 import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
@@ -51,7 +50,6 @@ export function App({ appConfig }: AppProps) {
       <main className="grid h-svh grid-cols-1 place-content-center">
         <ViewController appConfig={appConfig} />
       </main>
-      <CloneStatusBanner />
       <DebugPanel />
       <StartAudioButton label="Start Audio" />
       <Toaster

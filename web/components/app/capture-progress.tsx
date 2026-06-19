@@ -30,8 +30,8 @@ function CaptureProgressInner({
   const rawState = useParticipantAttribute('clone.state', { participant: agent });
   const state = (rawState as CloneState | undefined) ?? 'idle';
 
-  // Once the clone pipeline takes over, the status pill (clone-status-banner)
-  // does the talking — hide this bar.
+  // Once the clone pipeline takes over (state leaves 'idle'), capture is done —
+  // hide this bar.
   if (state !== 'idle') return null;
 
   const secs = Number.isFinite(Number(rawSecs)) ? Number(rawSecs) : 0;

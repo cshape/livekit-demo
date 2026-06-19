@@ -76,7 +76,7 @@ The Python agent calls `self._set_clone_state("<state>")` at each transition, wh
 - `ready` — set when Fish returns the model_id.
 - `playing` — set in `play_cloned_voice` after the TTS swap.
 
-No `recording` state — the demo no longer prompts the user for a monologue, so there's no countdown phase to show. React reads the attribute via `useParticipantAttribute('clone.state', { participant: agent })`. `web/components/app/clone-status-banner.tsx` is a fixed top-center pill that swaps between spinner (cloning) and static success badges (ready / playing). Mounted in `web/components/app/app.tsx` inside `<AgentSessionProvider>` so the hooks bind to the same session.
+No `recording` state — the demo no longer prompts the user for a monologue, so there's no countdown phase to show. React reads the attribute via `useParticipantAttribute('clone.state', { participant: agent })`. The status pill that used to surface these states was removed; `clone.state` now drives only `web/components/app/capture-progress.tsx` (hides the capture bar once state leaves `idle`) and the `/debug` overlay's clone-state log. The agent still sets it, so re-add UI off it if needed.
 
 Don't reuse the built-in `lk.agent.state` attribute (`listening`/`thinking`/`speaking`) for cloning UI — it flickers during `session.say` and tool execution and isn't a clean source of truth.
 

@@ -15,7 +15,7 @@ name = "agent-starter-python"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "livekit-agents", extra = ["cartesia", "groq", "silero"] },
+    { name = "livekit-agents", extra = ["cartesia", "openai", "silero"] },
     { name = "livekit-plugins-ai-coustics" },
     { name = "livekit-plugins-fishaudio" },
     { name = "python-dotenv" },
@@ -30,7 +30,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "livekit-agents", extras = ["cartesia", "groq", "silero"], specifier = ">=1.6.0" },
+    { name = "livekit-agents", extras = ["cartesia", "openai", "silero"], specifier = ">=1.6.0" },
     { name = "livekit-plugins-ai-coustics", specifier = "~=0.2" },
     { name = "livekit-plugins-fishaudio", specifier = ">=1.6.0" },
     { name = "python-dotenv" },
@@ -1014,9 +1014,6 @@ codecs = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-groq = [
-    { name = "livekit-plugins-groq" },
-]
 images = [
     { name = "pillow" },
 ]
@@ -1120,20 +1117,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c2/7f/62c260ef5087e47b07757a9b5181aa22be84bd976d0769e6c9228edd8fc7/livekit_plugins_fishaudio-1.6.0.tar.gz", hash = "sha256:162ec86fc888a93197d7c112c48c215bc54bfefcfc76fefa92565f07924db770", size = 7787, upload-time = "2026-06-11T21:38:02.23Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/c7/daea01d83786daabce8dd87cc1b483a2823a1181f1e43e91c096f644ad54/livekit_plugins_fishaudio-1.6.0-py3-none-any.whl", hash = "sha256:c497e4fcb23578d5de0a680ce8b9f251c8db8de14e9d75d3b7d9afed815b28ff", size = 7884, upload-time = "2026-06-11T21:38:01.072Z" },
-]
-
-[[package]]
-name = "livekit-plugins-groq"
-version = "1.6.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "livekit" },
-    { name = "livekit-agents", extra = ["codecs", "openai"] },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/22/fafd2b125612f8613de6462e5ab8add82d29c5d82145cd04d96482f50c40/livekit_plugins_groq-1.6.0.tar.gz", hash = "sha256:a3c53bf875bebba7073fa0e02a977cbcbc31d03806f04ad2cbff1103619c91ef", size = 6133, upload-time = "2026-06-11T21:37:58.854Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/5b/99d34fcf62b1cf0117ed128d83b662b0b01ca3d859a5d0c44afcf4a43fda/livekit_plugins_groq-1.6.0-py3-none-any.whl", hash = "sha256:5603c90594e56df6560ffcaa5b701a5fcdad05ea3e7622967ff0bb54a66f1d6f", size = 7321, upload-time = "2026-06-11T21:37:57.893Z" },
 ]
 
 [[package]]

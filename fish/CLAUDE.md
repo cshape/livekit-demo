@@ -7,7 +7,7 @@ See `@AGENTS.md` for the upstream LiveKit Agents conventions (uv, src/ layout, l
 ## Stack
 
 - **STT**: Cartesia `ink-whisper` (`livekit-plugins-cartesia`)
-- **LLM**: Groq `openai/gpt-oss-120b` (`livekit-plugins-groq`)
+- **LLM**: OpenAI `gpt-5.4-nano` (`livekit-plugins-openai`); model overridable via `OPENAI_MODEL`. (Was Groq `gpt-oss-120b` — swapped off after its free-tier 8k TPM limit throttled the demo with 429s.)
 - **TTS**: Fish Audio `s2-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
@@ -19,7 +19,7 @@ LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
 CARTESIA_API_KEY=...
-GROQ_API_KEY=...
+OPENAI_API_KEY=...
 FISH_API_KEY=...
 ```
 
@@ -87,7 +87,7 @@ The agent silently buffers user audio in the background during normal conversati
 1. Session starts, agent greets warmly with no mention of cloning. `Assistant.install_capture(session)` (called from `my_agent` after `session.start`) tees `session.input.audio` through a `PassthroughCaptureAudioInput` that forwards every frame unchanged *and* appends it to an in-memory buffer when `tee.recording` is True. The tee is hard-capped at `CAPTURE_MAX_SECS` (60s) of buffered audio — long recordings get truncated rather than ballooning memory.
 2. `install_capture` also subscribes to `session.on("user_state_changed", ...)` and flips `tee.recording` based on whether the user is currently speaking. It tracks cumulative speech wall-clock between `speaking` → `listening`/`away` transitions; once it crosses `CLONE_PITCH_THRESHOLD_SECS` (10s — Fish Audio's voice cloning works on ~10s of reference audio), `_capture_ready` flips to True.
 3. `Assistant.on_user_turn_completed(turn_ctx, new_message)` checks `_capture_ready and not _pitch_done` on every completed user turn. The first time it's True, it appends a hidden system message to `turn_ctx` telling the LLM to organically pivot to the clone pitch in its next response, and sets `_pitch_done = True`. The pitch rides the normal next-response cycle so it can't interrupt the user mid-turn.
-4. On confirmation, LLM calls `Assistant.clone_my_voice` with **zero preamble** — the tool plays its own cues. The tool snapshots `self._capture.frames`, sets `clone.state = "cloning"`, and fires a short verbatim `session.say("Got it! Give me just a sec to clone your voice.", add_to_chat_ctx=False, allow_interruptions=False)` — and *concurrently* runs silero VAD-trim → fresh `cartesia.STT` one-shot transcription → POST `/v1/model` to Fish (multipart, `train_mode=fast`, `visibility=private`, with `texts=<transcript>`). Verbatim instead of `generate_reply` because `generate_reply` from inside a tool auto-sets `tool_choice="none"`, and Groq's `gpt-oss-120b` strictly errors when the model emits a tool call anyway.
+4. On confirmation, LLM calls `Assistant.clone_my_voice` with **zero preamble** — the tool plays its own cues. The tool snapshots `self._capture.frames`, sets `clone.state = "cloning"`, and fires a short verbatim `session.say("Got it! Give me just a sec to clone your voice.", add_to_chat_ctx=False, allow_interruptions=False)` — and *concurrently* runs silero VAD-trim → fresh `cartesia.STT` one-shot transcription → POST `/v1/model` to Fish (multipart, `train_mode=fast`, `visibility=private`, with `texts=<transcript>`). Verbatim instead of `generate_reply` because `generate_reply` from inside a tool auto-sets `tool_choice="none"` (which strictly errored on the old Groq `gpt-oss-120b` if the model emitted a tool call anyway — kept as a safe convention now that we're on OpenAI).
 5. Tool awaits the ack's `SpeechHandle.wait_for_playout()` and returns with a directive telling the LLM to ask "wanna hear it?" in one sentence.
 6. User says yes → LLM calls `Assistant.play_cloned_voice` → `fishaudio.TTS.update_options(voice_id=...)`. Next utterance is in the cloned voice.
 7. On session end, `ctx.add_shutdown_callback` `DELETE`s the Fish model.
@@ -107,7 +107,7 @@ The agent silently buffers user audio in the background during normal conversati
 - One `Agent` subclass (`Assistant`), tools as `@function_tool`-decorated methods. No agent handoffs / `AgentTask` unless the flow grows.
 - Cloning is synchronous inside the tool — no background tasks (they raced with the LLM tool-response queue).
 - For any "the agent should speak something not from the LLM" use `session.say(text, add_to_chat_ctx=...)`. Set `add_to_chat_ctx=False` for system-only cues so the LLM's chat context stays clean.
-- Don't call `session.generate_reply(...)` from inside a `@function_tool` — it auto-sets `tool_choice="none"`, and Groq's `gpt-oss-120b` strictly errors if the model emits a tool call anyway. Use `session.say` instead.
+- Don't call `session.generate_reply(...)` from inside a `@function_tool` — it auto-sets `tool_choice="none"` (this strictly errored on the old Groq `gpt-oss-120b` if the model emitted a tool call anyway; kept as a safe convention). Use `session.say` instead.
 - To shape the LLM's next response from outside a tool (e.g. pivoting the conversation), override `Agent.on_user_turn_completed(turn_ctx, new_message)` and `turn_ctx.add_message(role="system", content=...)`. It rides the natural next-response cycle and won't interrupt the user mid-turn.
 
 ## Project layout

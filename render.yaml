@@ -62,7 +62,7 @@ envVarGroups:
       # Provider API keys (worker-only, but harmless on web).
       - key: CARTESIA_API_KEY
         sync: false
-      - key: GROQ_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: FISH_API_KEY
         sync: false

@@ -2,7 +2,7 @@
 
 A small voice agent that lets you clone your own voice in ~10 seconds of
 conversation, powered by [Fish Audio](https://fish.audio),
-[Cartesia](https://cartesia.ai), [Groq](https://groq.com), and
+[Cartesia](https://cartesia.ai), [OpenAI](https://openai.com), and
 [LiveKit Agents](https://docs.livekit.io/agents/).
 
 ```
@@ -17,7 +17,7 @@ Dockerfile), so you can run the whole thing together or grab just one half.
 ## Prereqs
 
 - A [LiveKit Cloud](https://cloud.livekit.io) project (free tier is plenty)
-- API keys for [Fish Audio](https://fish.audio), [Cartesia](https://cartesia.ai), and [Groq](https://console.groq.com)
+- API keys for [Fish Audio](https://fish.audio), [Cartesia](https://cartesia.ai), and [OpenAI](https://platform.openai.com)
 - Then either [Docker](https://docs.docker.com/get-started/get-docker/) (Compose path) **or**
   [`uv`](https://docs.astral.sh/uv/getting-started/installation/) + [`pnpm`](https://pnpm.io/installation) (Node 20+) for the local path
 
@@ -70,7 +70,7 @@ the current production deploy.
    - `livekit-demo-web` — Next.js (free tier).
    - `livekit-demo-agent` — Python worker (Starter, ~$7/mo; Render has no free worker tier).
 3. Fill in the `livekit-demo-shared` env-var group with your real LiveKit /
-   Fish / Cartesia / Groq keys.
+   Fish / Cartesia / OpenAI keys.
 4. Hit deploy. Both services come up against the same LiveKit Cloud project.
 
 If the worker pricing is a blocker, [Fly.io](https://fly.io) and [Railway](https://railway.app)

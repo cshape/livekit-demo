@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
 import { headers } from 'next/headers';
@@ -38,6 +39,15 @@ const commitMono = localFont({
     },
   ],
 });
+
+// Base URL for resolving the file-based opengraph-image into an absolute URL.
+// Render sets RENDER_EXTERNAL_URL automatically; SITE_URL overrides for other
+// hosts; falls back to localhost for local dev.
+export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.SITE_URL ?? process.env.RENDER_EXTERNAL_URL ?? 'http://localhost:3000'
+  ),
+};
 
 interface RootLayoutProps {
   children: React.ReactNode;

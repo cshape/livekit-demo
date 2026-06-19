@@ -73,10 +73,10 @@ class Assistant(Agent):
         self._speech_started_at: float | None = None
         self._capture_ready: bool = False
         self._pitch_done: bool = False
-        # Track the last injected capture-status system message so we can drop
-        # it on the next turn — keeps the LLM seeing exactly one current value
-        # instead of a growing log of stale numbers.
-        self._status_msg_id: str | None = None
+        # Track the last system note we injected (capture-status OR clone-now
+        # pivot) so we can drop it on the next turn — keeps the LLM seeing exactly
+        # one current instruction instead of a growing stack of stale ones.
+        self._injected_msg_id: str | None = None
         # Keep strong refs to fire-and-forget attribute pushes so the event loop
         # doesn't GC them mid-flight.
         self._bg_tasks: set[asyncio.Task[None]] = set()
@@ -155,27 +155,29 @@ class Assistant(Agent):
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
     ) -> None:
-        """Each user turn, refresh a one-line capture-status note in the chat
-        context so the LLM knows exactly how much voice has been buffered. Once
-        the buffer crosses threshold, swap the status for a one-shot pivot
-        instruction that tells the LLM to call `clone_my_voice`.
+        """Each user turn, refresh a one-line system note in the chat context.
+        Before the buffer crosses threshold it's a capture-status note (how much
+        voice is buffered). Once ready, it becomes a "clone now" pivot — and we
+        re-inject that pivot every turn until the clone actually happens, so a
+        single turn where the LLM ignores it can't strand the flow with the agent
+        stuck asking for "more voice" forever.
 
         Done here (rather than via a background task that calls generate_reply)
         so anything we inject rides the normal next-response cycle and can't
         interrupt the user mid-turn."""
-        # Drop the previous capture-status message so the LLM only ever sees the
-        # latest value, not a stack of stale numbers.
-        if self._status_msg_id is not None:
+        # Drop the note we injected last turn so the LLM only ever sees the
+        # single current instruction, not a stack of stale ones.
+        if self._injected_msg_id is not None:
             try:
-                idx = turn_ctx.index_by_id(self._status_msg_id)
+                idx = turn_ctx.index_by_id(self._injected_msg_id)
                 if idx is not None:
                     turn_ctx.items.pop(idx)
             except Exception:
-                logger.exception("failed to drop previous capture-status message")
-            self._status_msg_id = None
+                logger.exception("failed to drop previous injected message")
+            self._injected_msg_id = None
 
-        # Nothing more to inject once we've already pitched.
-        if self._pitch_done or self._cloned_voice_id is not None:
+        # Once the clone exists, there's nothing left to inject.
+        if self._cloned_voice_id is not None:
             return
 
         if not self._capture_ready:
@@ -189,21 +191,26 @@ class Assistant(Agent):
                     "read it out as a literal stat."
                 ),
             )
-            self._status_msg_id = msg.id
+            self._injected_msg_id = msg.id
             return
 
-        self._pitch_done = True
-        turn_ctx.add_message(
+        # Buffer is ready. Re-inject the clone-now pivot every turn (not just
+        # once) so the instruction is always present until clone_my_voice runs.
+        msg = turn_ctx.add_message(
             role="system",
             content=(
-                "There is now enough of the user's voice buffered to actually clone it. "
-                "If the user has already agreed to try voice cloning earlier in the conversation, "
-                "call `clone_my_voice` right now with no preamble. "
+                "There is now enough of the user's voice buffered to actually clone it — "
+                "do not say you need more voice or ask them to keep talking. "
+                "If the user has already agreed to try voice cloning (or is asking you to "
+                "clone it now), call `clone_my_voice` right now with no preamble. "
                 "Otherwise, briefly acknowledge what they just said and, in the same short "
                 "sentence, offer to clone their voice right now."
             ),
         )
-        logger.info("injected voice-clone pivot instruction into turn_ctx")
+        self._injected_msg_id = msg.id
+        if not self._pitch_done:
+            self._pitch_done = True
+            logger.info("injected voice-clone pivot instruction into turn_ctx")
 
     @function_tool
     async def clone_my_voice(self, context: RunContext) -> str:

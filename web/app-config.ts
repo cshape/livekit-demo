@@ -33,9 +33,10 @@ export interface AppConfig {
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfig = {
-  companyName: 'LiveKit',
-  pageTitle: 'LiveKit Voice Agent',
-  pageDescription: 'A voice agent built with LiveKit',
+  companyName: 'Fish Audio',
+  pageTitle: 'Clone your voice with Fish Audio',
+  pageDescription:
+    'Chat with a voice agent and, if you want, clone your voice from ~10 seconds of the conversation. Your recording and the clone are deleted when the call ends.',
 
   supportsChatInput: false,
   supportsVideoInput: false,

@@ -38,6 +38,18 @@ function linkifyFishAudio(text: string): string {
   return text.replace(/\bfish(?:\s+dot\s+|\.)audio\b/gi, `[fish.audio](${FISH_URL})`);
 }
 
+// While "fish dot audio" is still streaming in word-by-word, the partial
+// ("fish dot", "fish dot aud"…) shows as plain text until the whole phrase
+// lands and linkifyFishAudio turns it into the link — so "fish dot audio"
+// flashes momentarily. Hide a trailing, not-yet-complete phrase. We require the
+// "dot" word (or "fish." followed by an audio letter) so a sentence that simply
+// ends in "fish" or "fish." stays untouched.
+function hideStreamingFishPartial(text: string): string {
+  return text
+    .replace(/\bfish(?:\s+dot\b\s*(?:audi|aud|au|a)?|\.(?:audi|aud|au|a))$/i, '')
+    .trimEnd();
+}
+
 /**
  * Props for the AgentChatTranscript component.
  */
@@ -92,7 +104,7 @@ export function AgentChatTranscript({
             <Message key={id} title={title} from={messageOrigin}>
               <MessageContent>
                 <MessageResponse className="[&_a]:font-medium [&_a]:text-sky-500 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-sky-400">
-                  {linkifyFishAudio(stripEmotionTags(message))}
+                  {linkifyFishAudio(hideStreamingFishPartial(stripEmotionTags(message)))}
                 </MessageResponse>
               </MessageContent>
             </Message>

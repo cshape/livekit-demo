@@ -19,9 +19,8 @@ export const WelcomeView = ({
         </h1>
 
         <p className="text-muted-foreground mt-4 text-base leading-relaxed text-pretty md:text-lg">
-          Have a quick chat with the voice agent. If you&rsquo;d like, it can clone your voice from
-          about ten seconds of the conversation and start talking back to you in it &mdash; totally
-          your call.
+          Chat with our LiveKit/Fish Audio-powered voice agent for just 10 seconds and we&rsquo;ll
+          demonstrate our fast and accurate voice cloning.
         </p>
 
         <p className="text-muted-foreground/80 mt-4 flex items-center gap-2 text-sm">

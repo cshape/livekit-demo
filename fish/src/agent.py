@@ -57,6 +57,14 @@ CLONE_ACK_LINES = [
 ]
 
 
+def _log_prefetch_done(task: asyncio.Task) -> None:
+    """Retrieve a finished prefetch task's exception so a never-awaited failure
+    (e.g. the user declined after the buffer was ready) doesn't surface as an
+    'exception was never retrieved' warning."""
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("clone prefetch failed: %s", task.exception())
+
+
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
@@ -92,6 +100,11 @@ class Assistant(Agent):
             ),
         )
         self._cloned_voice_id: str | None = None
+        # Upload kicked off in the background the instant the buffer crosses
+        # threshold (see install_capture) so clone_my_voice can await an
+        # already-running/finished upload instead of starting cold. Network-only —
+        # no speaking happens here, so it can't race the LLM tool-response queue.
+        self._clone_prefetch_task: asyncio.Task[str] | None = None
         self._job_ctx: JobContext | None = None
         self._capture: PassthroughCaptureAudioInput | None = None
         self._cumulative_speech_secs: float = 0.0
@@ -164,6 +177,15 @@ class Assistant(Agent):
                     self._cumulative_speech_secs,
                     tee.buffered_secs,
                 )
+                # Prefetch the upload now (network-only, no speech) so a later
+                # clone_my_voice can await an already-running/finished clone
+                # instead of starting cold. The prior background attempt raced
+                # because it SPOKE from the task; this only uploads.
+                if tee.frames:
+                    self._clone_prefetch_task = asyncio.create_task(
+                        self._run_clone_upload(list(tee.frames), session.vad)
+                    )
+                    self._clone_prefetch_task.add_done_callback(_log_prefetch_done)
 
             # Push the updated capture-seconds attribute so the frontend progress
             # bar advances. Cheap: one attribute write per user-turn boundary.
@@ -237,6 +259,39 @@ class Assistant(Agent):
             self._pitch_done = True
             logger.info("injected voice-clone pivot instruction into turn_ctx")
 
+    async def _run_clone_upload(self, frames, vad_model) -> str:
+        """Trim → transcribe → upload the buffered frames to Fish, returning the new
+        model_id. Pure network/CPU work with NO speaking, so it's safe to run in the
+        background (prefetch) the moment the buffer is ready, as well as inline."""
+        if vad_model is not None:
+            try:
+                frames = await vad_trim_frames(vad_model, frames)
+            except Exception:
+                logger.exception("VAD trim failed; using raw frames")
+
+        transcript: str | None = None
+        transcript_stt = assemblyai.STT()
+        try:
+            transcript = await transcribe_frames(transcript_stt, frames) or None
+            if transcript:
+                logger.info("reference transcript: %s", transcript)
+        except Exception:
+            logger.exception(
+                "STT for reference transcript failed; uploading without texts"
+            )
+        finally:
+            await transcript_stt.aclose()
+
+        wav_bytes = frames_to_wav(frames)
+        model_id = await create_voice_clone(
+            os.environ["FISH_API_KEY"],
+            wav_bytes,
+            title="livekit-demo-clone",
+            transcript=transcript,
+        )
+        logger.info("created cloned voice id=%s", model_id)
+        return model_id
+
     @function_tool
     async def clone_my_voice(self, context: RunContext) -> str:
         """Upload the user's voice (already buffered from the conversation so far) to
@@ -249,7 +304,6 @@ class Assistant(Agent):
         reply is already in their cloned voice — there is no "want to hear it?" step).
         """
         session = context.session
-        api_key = os.environ["FISH_API_KEY"]
 
         if self._capture is None or not self._capture.frames:
             logger.warning("clone_my_voice called but no buffered audio")
@@ -272,12 +326,10 @@ class Assistant(Agent):
                 "clone_my_voice again until the hidden system instruction tells you to."
             )
 
-        # Snapshot so further capture can't mutate what we upload.
-        frames = list(self._capture.frames)
         logger.info(
-            "starting clone: %d frames (~%.1fs buffered)",
-            len(frames),
+            "starting clone: ~%.1fs buffered (prefetch=%s)",
             self._capture.buffered_secs,
+            self._clone_prefetch_task is not None,
         )
 
         await self._set_clone_state("cloning")
@@ -298,43 +350,27 @@ class Assistant(Agent):
             await self._set_clone_state("idle")
             return "Session ended before cloning finished."
 
-        # Run trim + STT + upload concurrently with the "hold on" playing back.
-        vad_model = session.vad
-        if vad_model is not None:
+        # Prefer the upload prefetched when the buffer went ready — it's usually
+        # already done, so this returns immediately. Fall back to running it inline
+        # if there was no prefetch task or it failed (lets a retry work too).
+        model_id: str | None = None
+        if self._clone_prefetch_task is not None:
             try:
-                frames = await vad_trim_frames(vad_model, frames)
+                model_id = await self._clone_prefetch_task
             except Exception:
-                logger.exception("VAD trim failed; using raw frames")
-
-        transcript: str | None = None
-        transcript_stt = assemblyai.STT()
-        try:
-            transcript = await transcribe_frames(transcript_stt, frames) or None
-            if transcript:
-                logger.info("reference transcript: %s", transcript)
-        except Exception:
-            logger.exception(
-                "STT for reference transcript failed; uploading without texts"
-            )
-        finally:
-            await transcript_stt.aclose()
-
-        wav_bytes = frames_to_wav(frames)
-
-        try:
-            model_id = await create_voice_clone(
-                api_key,
-                wav_bytes,
-                title="livekit-demo-clone",
-                transcript=transcript,
-            )
-        except Exception as e:
-            logger.exception("fish create-model failed")
-            await self._set_clone_state("idle")
-            return f"Cloning failed: {e}. Apologize and offer to retry."
+                logger.exception("prefetched clone failed; retrying inline")
+                self._clone_prefetch_task = None
+        if model_id is None:
+            try:
+                model_id = await self._run_clone_upload(
+                    list(self._capture.frames), session.vad
+                )
+            except Exception as e:
+                logger.exception("fish create-model failed")
+                await self._set_clone_state("idle")
+                return f"Cloning failed: {e}. Apologize and offer to retry."
 
         self._cloned_voice_id = model_id
-        logger.info("created cloned voice id=%s", model_id)
         await self._set_clone_state("ready")
 
         # Wait for the "got it" ack to finish playing so the cloned-voice reveal
@@ -410,12 +446,25 @@ async def my_agent(ctx: JobContext):
     assistant._job_ctx = ctx
 
     async def _cleanup_cloned_voice(_reason: str) -> None:
-        if assistant._cloned_voice_id is None:
+        model_id = assistant._cloned_voice_id
+        # Also cover a clone that was prefetched but never used — e.g. the buffer
+        # crossed threshold and we uploaded, but the user then declined — so it
+        # doesn't linger on Fish.
+        task = assistant._clone_prefetch_task
+        if (
+            model_id is None
+            and task is not None
+            and task.done()
+            and not task.cancelled()
+            and task.exception() is None
+        ):
+            model_id = task.result()
+        if model_id is None:
             return
         api_key = os.environ.get("FISH_API_KEY")
         if not api_key:
             return
-        await delete_voice_clone(api_key, assistant._cloned_voice_id)
+        await delete_voice_clone(api_key, model_id)
 
     ctx.add_shutdown_callback(_cleanup_cloned_voice)
 

@@ -1,8 +1,14 @@
 'use client';
 
 import { type ComponentProps } from 'react';
+import type { RemoteParticipant } from 'livekit-client';
 import { AnimatePresence } from 'motion/react';
-import { type AgentState, type ReceivedMessage } from '@livekit/components-react';
+import {
+  type AgentState,
+  type ReceivedMessage,
+  useParticipantAttribute,
+  useVoiceAssistant,
+} from '@livekit/components-react';
 import { AgentChatIndicator } from '@/components/agents-ui/agent-chat-indicator';
 import {
   Conversation,
@@ -121,11 +127,37 @@ export function AgentChatTranscript({
             </Message>
           );
         })}
-        <AnimatePresence>
-          {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
-        </AnimatePresence>
+        <ThinkingIndicator agentState={agentState} />
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
   );
+}
+
+// Shows the "preparing a response" dots when the agent is thinking OR while the
+// voice clone is being built (clone.state === 'cloning'), so there's never a
+// static screen during any cloning/upload delay. Split outer/inner because
+// useParticipantAttribute requires a participant — the agent may not exist yet.
+function ThinkingIndicator({ agentState }: { agentState?: AgentState }) {
+  const { agent } = useVoiceAssistant();
+  if (!agent) {
+    return (
+      <AnimatePresence>
+        {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
+      </AnimatePresence>
+    );
+  }
+  return <ThinkingIndicatorInner agentState={agentState} agent={agent} />;
+}
+
+function ThinkingIndicatorInner({
+  agentState,
+  agent,
+}: {
+  agentState?: AgentState;
+  agent: RemoteParticipant;
+}) {
+  const cloneState = useParticipantAttribute('clone.state', { participant: agent });
+  const show = agentState === 'thinking' || cloneState === 'cloning';
+  return <AnimatePresence>{show && <AgentChatIndicator size="sm" />}</AnimatePresence>;
 }

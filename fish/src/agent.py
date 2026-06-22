@@ -373,6 +373,13 @@ async def my_agent(ctx: JobContext):
             model="s2.1-pro",
             voice_id="10b2254869cf4340bdb801928e2fc88e",
             latency_mode="low",
+            # PCM, not the default WAV. With streamed LLM output, the WAV-container
+            # decode path produces an audible first-word "crackle" over WebRTC that
+            # the raw-PCM path doesn't (a single continuous session.say never
+            # crackles, only token-streamed generate_reply). Fish's bytes are clean
+            # either way — raw PCM just avoids the container/decode path. See the
+            # upstream investigation in livekit/agents.
+            output_format="pcm",
         ),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.

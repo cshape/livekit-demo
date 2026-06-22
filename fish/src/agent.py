@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import random
 import textwrap
 
 from dotenv import load_dotenv
@@ -36,6 +37,24 @@ CLONE_PITCH_THRESHOLD_SECS = 10.0
 # Hard cap on buffered audio that gets uploaded to Fish. Long recordings get
 # truncated to the first CAPTURE_MAX_SECS of speech.
 CAPTURE_MAX_SECS = 60.0
+
+# Spoken (in the agent's original voice) the moment the clone starts uploading,
+# to fill the upload window. One is picked at random per clone. Each sets the
+# expectation that the agent's *next* line will be in the user's cloned voice.
+# Leading [emotion] tags are Fish delivery cues and are stripped from the
+# transcript. Kept uninterruptible so the line always plays in full.
+CLONE_ACK_LINES = [
+    "[excited] OK, I've got enough audio to clone your voice now. Hang on just a "
+    "second, and when I talk next, I should be using a voice that sounds a lot like yours.",
+    "[delighted] Perfect, that's plenty of your voice to work with. Give me just a "
+    "moment here, and the next time you hear me, I'll be speaking in a clone of your own voice.",
+    "[amazed] Awesome, I think that's everything I need from you. Sit tight for a "
+    "sec while I put this together, and then my next words should sound just like you.",
+    "[happy] Great, that's enough audio for me to build your clone. Hang tight for "
+    "one moment, and when I come back, I'll be talking in a voice that sounds remarkably like yours.",
+    "[playful] Nice, I've captured enough of your voice to clone it. Just give me a "
+    "second or two, and the very next thing I say should sound a whole lot like you.",
+]
 
 
 class Assistant(Agent):
@@ -264,7 +283,7 @@ class Assistant(Agent):
         # tool_choice="none", which suppresses further tool calls.
         try:
             ack_handle = session.say(
-                "[excited] Got it! Give me just a sec to clone your voice.",
+                random.choice(CLONE_ACK_LINES),
                 add_to_chat_ctx=False,
                 allow_interruptions=False,
             )

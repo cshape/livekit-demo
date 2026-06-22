@@ -41,6 +41,11 @@ function stripEmotionTags(text: string): string {
         ''
       )
       .replace(/\b(?:(?:heh|hah?|ha)[\s,]*){2,}/gi, '')
+      // The model sometimes wraps its delivery tags in backticks (mirroring how
+      // the prompt formats them, e.g. `[playful]`). The [tag] strip above removes
+      // the inside but leaves the backticks orphaned, so drop any stray backticks
+      // (and asterisks) — a voice reply never has legitimate markdown formatting.
+      .replace(/[`*]+/g, '')
       .replace(/\s+([,.!?])/g, '$1')
       .replace(/\s+/g, ' ')
       .trim()

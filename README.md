@@ -65,16 +65,11 @@ that provisions both services from a single click — no Docker needed.
 
 1. Push the repo to GitHub.
 2. In the Render dashboard: **New → Blueprint**, pick this repo. Render reads
-   `render.yaml` and offers to create:
-   - `livekit-demo-web` — Next.js (Starter, ~$7/mo; or drop to the free tier, which sleeps when idle).
-   - `livekit-demo-agent` — Python worker (Starter, ~$7/mo; Render has no free worker tier).
+   `render.yaml` and creates both services — `livekit-demo-web` (Next.js
+   frontend) and `livekit-demo-agent` (Python worker).
 3. Fill in the `livekit-demo-shared` env-var group with your real LiveKit /
    Fish / AssemblyAI / OpenAI keys.
 4. Hit deploy. Both services come up against the same LiveKit Cloud project.
-
-If the worker pricing is a blocker, [Fly.io](https://fly.io) and [Railway](https://railway.app)
-both have cheaper long-running processes — the same `fish/` directory works
-with either (uv-based, or via `fish/Dockerfile`).
 
 ## How it works
 

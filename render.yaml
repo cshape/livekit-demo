@@ -7,10 +7,9 @@
 #   3. Fill in the env-var group `livekit-demo-shared` with your real keys.
 #      (Same values you have in fish/.env.local and web/.env.local.)
 #
-# Plans: both services run on Starter (~$7/mo each) so neither sleeps. The web
-# service can drop to Render's free tier to save money, but it spins down after
-# ~15 min idle (cold-start delays of ~50s); Render workers have no free tier.
-# If cost is a blocker, fly.io or railway.app are cheaper for the worker.
+# Plans: both services run on Starter so neither sleeps. The web service can
+# drop to Render's free tier to save money, but it spins down after ~15 min idle
+# (cold-start delays of ~50s); Render workers have no free tier.
 
 services:
   # Next.js frontend: serves the landing page + the /api/token route that mints

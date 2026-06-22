@@ -66,7 +66,7 @@ that provisions both services from a single click — no Docker needed.
 1. Push the repo to GitHub.
 2. In the Render dashboard: **New → Blueprint**, pick this repo. Render reads
    `render.yaml` and offers to create:
-   - `livekit-demo-web` — Next.js (free tier).
+   - `livekit-demo-web` — Next.js (Starter, ~$7/mo; or drop to the free tier, which sleeps when idle).
    - `livekit-demo-agent` — Python worker (Starter, ~$7/mo; Render has no free worker tier).
 3. Fill in the `livekit-demo-shared` env-var group with your real LiveKit /
    Fish / AssemblyAI / OpenAI keys.

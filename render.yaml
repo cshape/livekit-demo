@@ -60,7 +60,7 @@ envVarGroups:
       - key: LIVEKIT_API_SECRET
         sync: false
       # Provider API keys (worker-only, but harmless on web).
-      - key: CARTESIA_API_KEY
+      - key: ASSEMBLYAI_API_KEY
         sync: false
       - key: OPENAI_API_KEY
         sync: false

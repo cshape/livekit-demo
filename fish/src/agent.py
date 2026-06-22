@@ -17,7 +17,7 @@ from livekit.agents import (
     cli,
     function_tool,
 )
-from livekit.plugins import cartesia, fishaudio, openai, silero
+from livekit.plugins import assemblyai, fishaudio, openai, silero
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -41,9 +41,8 @@ CAPTURE_MAX_SECS = 60.0
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            # OpenAI (was Groq's gpt-oss-120b, whose free-tier 8k TPM limit
-            # throttled the demo). Model is env-overridable so the exact id can be
-            # swapped without a code change.
+            # Model is env-overridable so the exact id can be swapped without a
+            # code change.
             llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-nano")),
             instructions=textwrap.dedent(
                 """
@@ -260,10 +259,9 @@ class Assistant(Agent):
 
         await self._set_clone_state("cloning")
 
-        # Short verbatim acknowledgment to fill the upload window. Verbatim (not
-        # generate_reply) because generate_reply inside a tool sets tool_choice="none"
-        # (which strictly errored on the old Groq gpt-oss if the model emitted a tool
-        # call anyway — kept as a safe convention now that we're on OpenAI).
+        # Short verbatim acknowledgment to fill the upload window. session.say
+        # (not generate_reply) because generate_reply inside a tool sets
+        # tool_choice="none", which suppresses further tool calls.
         try:
             ack_handle = session.say(
                 "[excited] Got it! Give me just a sec to clone your voice.",
@@ -284,7 +282,7 @@ class Assistant(Agent):
                 logger.exception("VAD trim failed; using raw frames")
 
         transcript: str | None = None
-        transcript_stt = cartesia.STT(model="ink-whisper", language="en")
+        transcript_stt = assemblyai.STT()
         try:
             transcript = await transcribe_frames(transcript_stt, frames) or None
             if transcript:
@@ -358,7 +356,7 @@ async def my_agent(ctx: JobContext):
     }
 
     session = AgentSession(
-        stt=cartesia.STT(model="ink-whisper", language="en"),
+        stt=assemblyai.STT(),
         tts=fishaudio.TTS(
             model="s2.1-pro",
             voice_id="10b2254869cf4340bdb801928e2fc88e",

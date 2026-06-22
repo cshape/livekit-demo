@@ -2,7 +2,7 @@
 
 A small voice agent that lets you clone your own voice in ~10 seconds of
 conversation, powered by [Fish Audio](https://fish.audio),
-[Cartesia](https://cartesia.ai), [OpenAI](https://openai.com), and
+[AssemblyAI](https://www.assemblyai.com), [OpenAI](https://openai.com), and
 [LiveKit Agents](https://docs.livekit.io/agents/).
 
 ```
@@ -17,7 +17,7 @@ Dockerfile), so you can run the whole thing together or grab just one half.
 ## Prereqs
 
 - A [LiveKit Cloud](https://cloud.livekit.io) project (free tier is plenty)
-- API keys for [Fish Audio](https://fish.audio), [Cartesia](https://cartesia.ai), and [OpenAI](https://platform.openai.com)
+- API keys for [Fish Audio](https://fish.audio), [AssemblyAI](https://www.assemblyai.com), and [OpenAI](https://platform.openai.com)
 - Then either [Docker](https://docs.docker.com/get-started/get-docker/) (Compose path) **or**
   [`uv`](https://docs.astral.sh/uv/getting-started/installation/) + [`pnpm`](https://pnpm.io/installation) (Node 20+) for the local path
 
@@ -69,7 +69,7 @@ that provisions both services from a single click — no Docker needed.
    - `livekit-demo-web` — Next.js (free tier).
    - `livekit-demo-agent` — Python worker (Starter, ~$7/mo; Render has no free worker tier).
 3. Fill in the `livekit-demo-shared` env-var group with your real LiveKit /
-   Fish / Cartesia / OpenAI keys.
+   Fish / AssemblyAI / OpenAI keys.
 4. Hit deploy. Both services come up against the same LiveKit Cloud project.
 
 If the worker pricing is a blocker, [Fly.io](https://fly.io) and [Railway](https://railway.app)
@@ -81,7 +81,7 @@ with either (uv-based, or via `fish/Dockerfile`).
 - The agent invites you to talk for ~10 seconds and buffers your mic audio in
   the background while you chat. It tracks cumulative user speech (per VAD) and
   clones once it has enough.
-- The buffered audio is VAD-trimmed, transcribed via Cartesia, and uploaded to
+- The buffered audio is VAD-trimmed, transcribed via AssemblyAI, and uploaded to
   Fish Audio's `/model` endpoint (`train_mode=fast`).
 - The cloned voice is swapped into the active TTS and revealed right away — the
   agent's next line speaks in your voice — then deleted from Fish on session end.

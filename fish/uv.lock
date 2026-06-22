@@ -535,7 +535,7 @@ name = "fish-voice-clone-agent"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "livekit-agents", extra = ["cartesia", "openai", "silero"] },
+    { name = "livekit-agents", extra = ["assemblyai", "openai", "silero"] },
     { name = "livekit-plugins-fishaudio" },
     { name = "python-dotenv" },
 ]
@@ -549,7 +549,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "livekit-agents", extras = ["cartesia", "openai", "silero"], specifier = ">=1.6.0" },
+    { name = "livekit-agents", extras = ["assemblyai", "openai", "silero"], specifier = ">=1.6.0" },
     { name = "livekit-plugins-fishaudio", specifier = ">=1.6.0" },
     { name = "python-dotenv" },
 ]
@@ -1005,8 +1005,8 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-cartesia = [
-    { name = "livekit-plugins-cartesia" },
+assemblyai = [
+    { name = "livekit-plugins-assemblyai" },
 ]
 codecs = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1076,15 +1076,15 @@ wheels = [
 ]
 
 [[package]]
-name = "livekit-plugins-cartesia"
+name = "livekit-plugins-assemblyai"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "livekit-agents" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/8c/852f31fe14d930f54108f5b31b719ca2268abf870f782312c9703d911175/livekit_plugins_cartesia-1.6.0.tar.gz", hash = "sha256:392d3f64c1d24ea273c92632a22e87680ba5c8ff057c31dc82f670286899f8a6", size = 18197, upload-time = "2026-06-11T21:37:28.705Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/8b/a422d298d7543facb660c961eb847ff6c9671c76e3717e0b6f064e809d9d/livekit_plugins_assemblyai-1.6.0.tar.gz", hash = "sha256:5541b726766e084ded19284428d92913ae0240a6168c48e723ebcc311d08fd11", size = 11323, upload-time = "2026-06-11T21:36:33.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/2a/efa58d6635406bb781e286578f3dbf68eb5caac5e3b592a9ce430192d065/livekit_plugins_cartesia-1.6.0-py3-none-any.whl", hash = "sha256:fd08157fe6aacb94157881aa3f5eaac6779912e39ccf74af5bd94370f37935e2", size = 25533, upload-time = "2026-06-11T21:37:27.628Z" },
+    { url = "https://files.pythonhosted.org/packages/63/4e/bae0446c8f02700abcb235eb548482231d28529a7f5f1697a1aa55cbbbe3/livekit_plugins_assemblyai-1.6.0-py3-none-any.whl", hash = "sha256:3066caadf8f3e599bc029c2f602b953bf922db66e9723fe4e16cf908b273b085", size = 11449, upload-time = "2026-06-11T21:36:32.403Z" },
 ]
 
 [[package]]

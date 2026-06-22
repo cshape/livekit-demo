@@ -50,7 +50,7 @@ AGENT_NAME=
 
 - Landing copy and the privacy note live in [`components/app/welcome-view.tsx`](./components/app/welcome-view.tsx).
 - Branding and page metadata live in [`app-config.ts`](./app-config.ts).
-- The clone-status pill is [`components/app/capture-progress.tsx`](./components/app/capture-progress.tsx), driven by the agent's `clone.state` participant attribute.
+- The voice-capture progress bar is [`components/app/capture-progress.tsx`](./components/app/capture-progress.tsx), driven by the agent's `clone.state` participant attribute.
 
 For the full Agents UI component reference (updating
 components via `pnpm shadcn:install`, etc.), see the upstream

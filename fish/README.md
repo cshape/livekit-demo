@@ -11,7 +11,7 @@ This directory is self-contained — you can run it on its own and point any
 
 ## Stack
 
-- **STT** — Cartesia `ink-whisper` (`livekit-plugins-cartesia`)
+- **STT** — AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
 - **LLM** — OpenAI `gpt-5.4-nano` (`livekit-plugins-openai`); override the model with `OPENAI_MODEL`
 - **TTS** — Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn detection** — Silero VAD only (no separate turn-detector model, to keep the worker footprint small)
@@ -55,7 +55,7 @@ LIVEKIT_URL=wss://<your-project>.livekit.cloud
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 
-CARTESIA_API_KEY=
+ASSEMBLYAI_API_KEY=
 OPENAI_API_KEY=
 FISH_API_KEY=
 ```

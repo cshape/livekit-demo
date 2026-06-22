@@ -25,6 +25,17 @@ function stripEmotionTags(text: string): string {
       // closing bracket lands and the complete-tag rule above removes it. Hide it
       // from the trailing "[" to end-of-string so nothing flickers mid-stream.
       .replace(/\[[^\]]*$/, '')
+      // Safety net: the prompt tells the model to keep sound effects inside
+      // [brackets] with no spoken text, but it occasionally freelances a stray
+      // laugh/sigh as "(heh)", "*laughs*", or bare "haha"/"heh heh". Strip those
+      // known tokens so they neither render nor read as noise. Deliberately
+      // narrow — we don't strip all parentheses.
+      .replace(
+        /[(*]\s*(?:chuckl\w*|laugh\w*|sigh\w*|groan\w*|gasp\w*|yawn\w*|hehe?|haha?|ahem)\s*[)*]/gi,
+        ''
+      )
+      .replace(/\b(?:(?:heh|hah?|ha)[\s,]*){2,}/gi, '')
+      .replace(/\s+([,.!?])/g, '$1')
       .replace(/\s+/g, ' ')
       .trim()
   );

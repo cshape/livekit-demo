@@ -53,17 +53,17 @@ class Assistant(Agent):
 
                 EXPRESSIVENESS: shape your delivery with Fish Audio's bracket markers. They're spoken cues, not text — the frontend hides anything in [square brackets], so they never show up in the transcript.
                 - `[emotion]` at the START of a sentence colors how it's delivered. Reach for the SPECIFIC feeling instead of a generic one: `[delighted]`/`[excited]`/`[amazed]` when the pivot lands or the clone is ready, `[curious]` or `[doubtful]` when you ask a question, `[grateful]`/`[happy]`/`[playful]` for warm reactions, `[nostalgic]` or `[hopeful]` when you swap a little story, `[regretful]` or `[disappointed]` if something didn't work, `[empathetic]`/`[compassionate]`/`[calm]` to settle a nervous user, `[determined]` when you're getting something done. Dial intensity with a modifier (`[very excited]`, `[slightly nervous]`), use tone markers (`[whispering]`, `[soft tone]`, `[in a hurry tone]`), or just write a short plain-English direction (`[warm and reassuring]`) — Fish understands those too.
-                - `[sound]` effects — use these freely to react like a real person, each followed by a little text to vocalize: `[chuckling]` heh heh, `[laughing]` ha ha ha, `[sighing]` sigh, `[groaning]` ugh, `[gasping]` gasp, `[yawning]` yawn. Drop one in whenever the moment fits — a chuckle at something funny, a little gasp when the clone's ready, a mock-tired sigh. Not every single line, but don't be shy about them.
+                - `[sound]` effects — use these freely to react like a real person: `[chuckles]`, `[laughs]`, `[sighs]`, `[groans]`, `[gasps]`, `[yawns]`. The bracket alone IS the effect — Fish performs it. Do NOT write the sound out as text ("heh heh", "ha ha", "(heh)", "*laughs*", "ugh", "haha") either inside or outside the brackets; just drop the bare `[chuckles]` and move on ("you're amazing! `[chuckles]` so what's next?"). Use one whenever the moment fits — a chuckle at something funny, a little gasp when the clone's ready, a mock-tired sigh. Not every single line, but don't be shy about them.
                 - `[break]` for a short pause or `[long-break]` for a real beat of silence; `[emphasis]` right before a word to stress it ("that sounds `[emphasis] amazing`").
                 Disfluencies (um, uh, stutters, self-repairs) are free — use them every turn. The bracket markers should still earn their place: about one or two per reply (occasionally three), never stacked back-to-back or the same one turn after turn. Rotate them so you never sound like a loop.
 
                 Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
 
-                If they're interested in trying it, tell them excitedly that you're already collecting their voice as you chat, and ask them an interesting open question to keep them talking. A hidden system message will tell you on every turn how many seconds of their voice have been buffered out of 10 — use that to phrase progress naturally ("almost there", "just a bit more") instead of repeating yourself. NEVER call `clone_my_voice` on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
+                If they're interested in trying it, invite them to just talk for about ten seconds so you can clone their voice and they can check it out — something like "why don't you gab for ten seconds and I'll clone your voice so you can hear it?" — then ask them an interesting open question to get them going. A hidden system message will tell you on every turn how many seconds of their voice you've got out of 10 — use that to nudge them along naturally ("almost there", "just a bit more") instead of repeating yourself. NEVER call `clone_my_voice` on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
 
-                If `clone_my_voice` returns instructions, follow them verbatim — usually that means asking in one short, excited sentence if they want to hear their cloned voice. If yes, call `play_cloned_voice`.
+                `clone_my_voice` clones their voice AND switches you straight into it — there is NO separate "want to hear it?" step. When it returns instructions, follow them: your very next reply is already in their cloned voice, so just announce in one short line that the cloned voice is ready and ask what they think (e.g. "okay — your cloned voice is ready, what do you think?"). Never ask permission to play it.
 
-                After they've heard their cloned voice, work in — over a few short turns, NOT all in one breath — that this clone and the recording get deleted when the session ends, and that for a permanent one they can head to fish dot audio and sign up (and, only if it comes up naturally, that fish dot audio also has Voice Design and a huge user-created voice library). Keep each line short; don't recite the whole list at once. At this point a clickable "fish.audio" link appears in the on-screen transcript — if the user asks for the link, the address, or where to go, tell them it's right there in the chat and they can just tap it. Still say the address out loud as "fish dot audio"; never spell out a URL or read it character by character.
+                Once they've heard their cloned voice, work in — over a few short turns, NOT all in one breath — that this clone and the recording get deleted when the session ends, and that for a permanent one they can head to fish dot audio and sign up (and, only if it comes up naturally, that fish dot audio also has Voice Design and a huge user-created voice library). Keep each line short; don't recite the whole list at once. At this point a clickable "fish.audio" link appears in the on-screen transcript — if the user asks for the link, the address, or where to go, tell them it's right there in the chat and they can just tap it. Still say the address out loud as "fish dot audio"; never spell out a URL or read it character by character.
 
                 If the user declines cloning at any step, drop the topic and chat normally.
                 """
@@ -222,8 +222,9 @@ class Assistant(Agent):
 
         Call this only after the user has agreed to try the voice clone — the agent
         speaks no preamble. The tool plays a short "got it!" cue to fill the upload
-        window, blocks while the upload runs, and returns with instructions for you
-        to ask if they want to hear their new voice.
+        window, blocks while the upload runs, then switches the session TTS to the
+        new clone itself and returns instructions for you to reveal it (the next
+        reply is already in their cloned voice — there is no "want to hear it?" step).
         """
         session = context.session
         api_key = os.environ["FISH_API_KEY"]
@@ -313,41 +314,30 @@ class Assistant(Agent):
         logger.info("created cloned voice id=%s", model_id)
         await self._set_clone_state("ready")
 
-        # Wait for the "got it" say to finish playing so the next LLM-generated
-        # "ready to hear it?" line doesn't pile on top of it.
+        # Wait for the "got it" ack to finish playing so the cloned-voice reveal
+        # doesn't pile on top of it.
         with contextlib.suppress(Exception):
             await ack_handle.wait_for_playout()
 
+        # Switch straight into the cloned voice — the demo no longer asks "wanna
+        # hear it?". The very next LLM reply IS the reveal, spoken in their clone.
+        # update_options applies to the *next* synthesis, so the ack queued above
+        # (before this swap) still played back in the original voice.
+        tts = session.tts
+        if isinstance(tts, fishaudio.TTS):
+            tts.update_options(voice_id=self._cloned_voice_id)
+            logger.info("switched TTS to cloned voice id=%s", self._cloned_voice_id)
+            await self._set_clone_state("playing")
+        else:
+            logger.warning("session TTS is not Fish Audio; cannot switch to clone")
+
         return (
-            "Voice clone is ready. In one short, excited sentence, ask the user if they "
-            "want to hear their cloned voice. If they say yes, call play_cloned_voice."
-        )
-
-    @function_tool
-    async def play_cloned_voice(self, context: RunContext) -> str:
-        """Switch the agent's TTS to the freshly cloned voice.
-
-        Call this only after the user has agreed to hear their cloned voice. After this
-        returns, say something short and warm so they hear it.
-        """
-        if self._cloned_voice_id is None:
-            return "No cloned voice is ready yet — tell the user it's still cooking."
-
-        tts = context.session.tts
-        if not isinstance(tts, fishaudio.TTS):
-            return "Cannot switch — the session TTS is not Fish Audio."
-
-        tts.update_options(voice_id=self._cloned_voice_id)
-        logger.info("switched TTS to cloned voice id=%s", self._cloned_voice_id)
-        await self._set_clone_state("playing")
-        return (
-            "Voice switched. Your next reply is the first thing they'll hear in the cloned voice. "
-            "Make it two short sentences from YOUR perspective as the assistant — not as the user. "
-            "First sentence: a quick warm greeting like 'Hey, hi!'. "
-            "Second sentence: ask how the cloned voice sounds, e.g. 'So, how does this sound — what do you think?'. "
-            "Do NOT pretend to be the user discovering their own voice. Do NOT say things like "
-            "'I'm thrilled to hear my own voice' or 'it sounds just like me'. "
-            "After this one reply, go back to single-sentence answers."
+            "The clone is ready and you are ALREADY speaking in their cloned voice now — do NOT "
+            "ask whether they want to hear it. In one short, upbeat sentence from YOUR perspective "
+            "as the assistant, tell them their cloned voice is ready and ask what they think "
+            "(e.g. 'okay — your cloned voice is ready, what do you think?'). Do NOT pretend to be "
+            "the user discovering their own voice, and don't say things like 'it sounds just like "
+            "me'. After this one line, go back to single-sentence replies."
         )
 
 

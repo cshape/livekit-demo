@@ -74,7 +74,7 @@ Open http://localhost:3000, hit "Start call". The worker auto-dispatches into th
 The Python agent calls `self._set_clone_state("<state>")` at each transition, which writes `clone.state` onto its participant attributes (read-modify-write — see the `set_attributes` gotcha below). Values:
 - `cloning` — set on entry to `clone_my_voice`, once the upload pipeline starts.
 - `ready` — set when Fish returns the model_id.
-- `playing` — set in `play_cloned_voice` after the TTS swap.
+- `playing` — set at the end of `clone_my_voice`, right after it swaps the TTS to the clone.
 
 No `recording` state — the demo no longer prompts the user for a monologue, so there's no countdown phase to show. React reads the attribute via `useParticipantAttribute('clone.state', { participant: agent })`. The status pill that used to surface these states was removed; `clone.state` now drives only `web/components/app/capture-progress.tsx` (hides the capture bar once state leaves `idle`) and the `/debug` overlay's clone-state log. The agent still sets it, so re-add UI off it if needed.
 
@@ -88,9 +88,8 @@ The agent silently buffers user audio in the background during normal conversati
 2. `install_capture` also subscribes to `session.on("user_state_changed", ...)` and flips `tee.recording` based on whether the user is currently speaking. It tracks cumulative speech wall-clock between `speaking` → `listening`/`away` transitions; once it crosses `CLONE_PITCH_THRESHOLD_SECS` (10s — Fish Audio's voice cloning works on ~10s of reference audio), `_capture_ready` flips to True.
 3. `Assistant.on_user_turn_completed(turn_ctx, new_message)` checks `_capture_ready and not _pitch_done` on every completed user turn. The first time it's True, it appends a hidden system message to `turn_ctx` telling the LLM to organically pivot to the clone pitch in its next response, and sets `_pitch_done = True`. The pitch rides the normal next-response cycle so it can't interrupt the user mid-turn.
 4. On confirmation, LLM calls `Assistant.clone_my_voice` with **zero preamble** — the tool plays its own cues. The tool snapshots `self._capture.frames`, sets `clone.state = "cloning"`, and fires a short verbatim `session.say("Got it! Give me just a sec to clone your voice.", add_to_chat_ctx=False, allow_interruptions=False)` — and *concurrently* runs silero VAD-trim → fresh `cartesia.STT` one-shot transcription → POST `/v1/model` to Fish (multipart, `train_mode=fast`, `visibility=private`, with `texts=<transcript>`). Verbatim instead of `generate_reply` because `generate_reply` from inside a tool auto-sets `tool_choice="none"` (which strictly errored on the old Groq `gpt-oss-120b` if the model emitted a tool call anyway — kept as a safe convention now that we're on OpenAI).
-5. Tool awaits the ack's `SpeechHandle.wait_for_playout()` and returns with a directive telling the LLM to ask "wanna hear it?" in one sentence.
-6. User says yes → LLM calls `Assistant.play_cloned_voice` → `fishaudio.TTS.update_options(voice_id=...)`. Next utterance is in the cloned voice.
-7. On session end, `ctx.add_shutdown_callback` `DELETE`s the Fish model.
+5. Tool awaits the ack's `SpeechHandle.wait_for_playout()`, then **itself** swaps the TTS to the clone (`fishaudio.TTS.update_options(voice_id=...)`), sets `clone.state = "playing"`, and returns a directive telling the LLM to announce the clone is ready and ask what they think. There is no "wanna hear it?" confirmation step — the reveal is automatic, so the next LLM reply is already in the cloned voice. (`update_options` applies to the *next* synthesis, so the ack queued before the swap still plays in the original voice.)
+6. On session end, `ctx.add_shutdown_callback` `DELETE`s the Fish model.
 
 ## Things that will bite you
 

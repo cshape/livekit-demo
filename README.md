@@ -61,8 +61,7 @@ or `docker compose up --build web`.
 ## Deploy to Render
 
 This repo ships a [Render Blueprint](https://render.com/docs/infrastructure-as-code) (`render.yaml`)
-that provisions both services from a single click — no Docker needed — and is
-the current production deploy.
+that provisions both services from a single click — no Docker needed.
 
 1. Push the repo to GitHub.
 2. In the Render dashboard: **New → Blueprint**, pick this repo. Render reads
@@ -79,13 +78,17 @@ with either (uv-based, or via `fish/Dockerfile`).
 
 ## How it works
 
-- Agent silently buffers user mic audio while you chat. Once ~10s of cumulative
-  user speech has been captured (per VAD), the agent organically pivots to
-  offering a voice clone.
-- On confirmation, the buffered audio is VAD-trimmed, transcribed via Cartesia,
-  and uploaded to Fish Audio's `/model` endpoint (`train_mode=fast`).
-- The cloned voice gets swapped into the active TTS for the rest of the
-  session and is deleted from Fish on session end.
+- The agent invites you to talk for ~10 seconds and buffers your mic audio in
+  the background while you chat. It tracks cumulative user speech (per VAD) and
+  clones once it has enough.
+- The buffered audio is VAD-trimmed, transcribed via Cartesia, and uploaded to
+  Fish Audio's `/model` endpoint (`train_mode=fast`).
+- The cloned voice is swapped into the active TTS and revealed right away — the
+  agent's next line speaks in your voice — then deleted from Fish on session end.
 
 See `fish/CLAUDE.md` for the full agent-side flow and `fish/src/agent.py` for
 the code.
+
+## License
+
+[MIT](LICENSE).

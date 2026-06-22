@@ -18,7 +18,6 @@ import {
   useInputControls,
   usePublishPermissions,
 } from '@/hooks/agents-ui/use-agent-control-bar';
-import { setDebugEnabled, toggleDebug } from '@/lib/debug-store';
 import { cn } from '@/lib/shadcn/utils';
 
 const LK_TOGGLE_VARIANT_1 = [
@@ -267,16 +266,6 @@ export function AgentControlBar({
   } = useInputControls({ onDeviceError, saveUserChoices });
 
   const handleSendMessage = async (message: string) => {
-    // Hidden `/debug` command — toggles the debug overlay instead of being sent
-    // to the agent. Supports `/debug on` and `/debug off` for explicit control.
-    const trimmed = message.trim();
-    if (trimmed === '/debug' || trimmed.startsWith('/debug ')) {
-      const arg = trimmed.slice('/debug'.length).trim().toLowerCase();
-      if (arg === 'on') setDebugEnabled(true);
-      else if (arg === 'off') setDebugEnabled(false);
-      else toggleDebug();
-      return;
-    }
     await send(message);
   };
 

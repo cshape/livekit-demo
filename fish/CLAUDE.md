@@ -2,13 +2,13 @@
 
 LiveKit Agents (Python) voice-cloning demo. Single agent at `src/agent.py`, voice-clone helpers at `src/voice_clone.py`. React frontend in sibling dir at `../web/` (Next.js 15 + Tailwind v4 + shadcn + `@livekit/components-react`, bootstrapped from the `agent-starter-react` template).
 
-See `@AGENTS.md` for the upstream LiveKit Agents conventions (uv, src/ layout, lk docs CLI).
+This is a LiveKit Agents (Python) project: use `uv` for everything, app code lives under `src/` with `agent.py` as the entrypoint, and `uv run ruff check src/` / `uv run ruff format src/` must stay green. For up-to-date LiveKit docs, use the `lk docs` CLI or the LiveKit docs MCP server.
 
 ## Stack
 
 - **STT**: Cartesia `ink-whisper` (`livekit-plugins-cartesia`)
 - **LLM**: OpenAI `gpt-5.4-nano` (`livekit-plugins-openai`); model overridable via `OPENAI_MODEL`. (Was Groq `gpt-oss-120b` — swapped off after its free-tier 8k TPM limit throttled the demo with 429s.)
-- **TTS**: Fish Audio `s2-pro` (`livekit-plugins-fishaudio`)
+- **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
 
@@ -115,5 +115,5 @@ The agent silently buffers user audio in the background during normal conversati
 src/
 ├── agent.py         # Assistant, tools, server entrypoint
 └── voice_clone.py   # capture-mute tee, VAD trim, STT transcribe, Fish HTTP
-tests/               # placeholder; no tests yet
+tests/               # test_agent.py — 3 LLM-judge eval tests (friendliness, grounding, refusal)
 ```

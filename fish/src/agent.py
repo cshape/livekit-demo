@@ -278,13 +278,15 @@ class Assistant(Agent):
 
         await self._set_clone_state("cloning")
 
-        # Short verbatim acknowledgment to fill the upload window. session.say
-        # (not generate_reply) because generate_reply inside a tool sets
-        # tool_choice="none", which suppresses further tool calls.
+        # Verbatim acknowledgment to fill the upload window. session.say (not
+        # generate_reply) because generate_reply inside a tool sets
+        # tool_choice="none", which suppresses further tool calls. Added to the
+        # chat context (it's a real conversational line, not a system cue) so the
+        # follow-up cloned-voice reveal flows from what was just promised here.
         try:
             ack_handle = session.say(
                 random.choice(CLONE_ACK_LINES),
-                add_to_chat_ctx=False,
+                add_to_chat_ctx=True,
                 allow_interruptions=False,
             )
         except RuntimeError:

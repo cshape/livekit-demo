@@ -267,7 +267,16 @@ def _build_llm():
     """
     model = os.getenv("LLM_MODEL", "google/gemini-3.5-flash")
     if os.getenv("LLM_BACKEND", "inference").lower() == "google":
-        return google.LLM(model=model.removeprefix("google/"))
+        model_id = model.removeprefix("google/")
+        kwargs: dict = {}
+        # Gemma 4 reasons by default, which is slow (~20s) AND leaks its planning into
+        # the spoken reply. "minimal" turns thinking off (fast, clean); the only other
+        # valid level is "high". Override with GOOGLE_THINKING_LEVEL if you want it on.
+        if "gemma-4" in model_id:
+            kwargs["thinking_config"] = {
+                "thinking_level": os.getenv("GOOGLE_THINKING_LEVEL", "minimal")
+            }
+        return google.LLM(model=model_id, **kwargs)
     return inference.LLM(model)
 
 

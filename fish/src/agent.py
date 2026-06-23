@@ -22,10 +22,9 @@ from livekit.agents import (
     StopResponse,
     cli,
     function_tool,
-    inference,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, google, silero
+from livekit.plugins import assemblyai, fishaudio, openai, silero
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -249,37 +248,6 @@ CLONE_FALLBACK_GREETING = (
 )
 
 
-def _build_llm():
-    """Construct the agent LLM. `LLM_BACKEND` selects the path:
-
-    - "inference" (default): LiveKit's inference gateway. `LLM_MODEL` is a
-      provider-prefixed id (e.g. "google/gemini-3.5-flash", "openai/gpt-oss-120b").
-      Auth via LIVEKIT_INFERENCE_API_KEY/SECRET (falls back to LIVEKIT_API_KEY/SECRET)
-      — must be LiveKit Cloud creds, not the dev key. NOTE: the public gateway does
-      NOT serve gemma-4-31b-it (returns "no deployment").
-    - "google": Google directly via the google plugin — the path for Gemma 4, which
-      Google hosts first-party on both the Gemini API and Vertex. `LLM_MODEL` is a bare
-      id (e.g. "gemma-4-31b-it"); a leading "google/" is stripped. The plugin auto-
-      picks the backend from GOOGLE_GENAI_USE_VERTEXAI:
-        * Gemini API (default): set GOOGLE_API_KEY (from Google AI Studio).
-        * Vertex AI: set GOOGLE_GENAI_USE_VERTEXAI=1, GOOGLE_CLOUD_PROJECT,
-          GOOGLE_CLOUD_LOCATION, and service-account creds (GOOGLE_APPLICATION_CREDENTIALS).
-    """
-    model = os.getenv("LLM_MODEL", "google/gemini-3.5-flash")
-    if os.getenv("LLM_BACKEND", "inference").lower() == "google":
-        model_id = model.removeprefix("google/")
-        kwargs: dict = {}
-        # Gemma 4 reasons by default, which is slow (~20s) AND leaks its planning into
-        # the spoken reply. "minimal" turns thinking off (fast, clean); the only other
-        # valid level is "high". Override with GOOGLE_THINKING_LEVEL if you want it on.
-        if "gemma-4" in model_id:
-            kwargs["thinking_config"] = {
-                "thinking_level": os.getenv("GOOGLE_THINKING_LEVEL", "minimal")
-            }
-        return google.LLM(model=model_id, **kwargs)
-    return inference.LLM(model)
-
-
 class Assistant(Agent):
     def __init__(self) -> None:
         # Register/mood start in the professional customer-service style; the
@@ -287,7 +255,9 @@ class Assistant(Agent):
         self._mode: str = "professional"
         self._mood: str | None = None
         super().__init__(
-            llm=_build_llm(),
+            # Direct OpenAI (own API key). gpt-5.4-mini follows the expressive markup
+            # well and is fast/reliable with the set_style tool. Model env-overridable.
+            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

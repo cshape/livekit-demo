@@ -14,7 +14,7 @@ This directory is self-contained — you can run it on its own and point any
 ## Stack
 
 - **STT** — AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM** — Google `gemini-3.5-flash` via LiveKit's inference gateway (`inference.LLM`); override with `LLM_MODEL` (provider-prefixed, e.g. `openai/gpt-4.1-mini`). Needs LiveKit Cloud inference creds (`LIVEKIT_INFERENCE_API_KEY/SECRET`)
+- **LLM** — OpenAI `gpt-5.4-mini` (`livekit-plugins-openai`, your `OPENAI_API_KEY`); override the model with `OPENAI_MODEL`
 - **TTS** — Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn detection** — Silero VAD only (no separate turn-detector model, to keep the worker footprint small)
 

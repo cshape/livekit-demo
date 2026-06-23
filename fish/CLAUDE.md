@@ -9,7 +9,7 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 ## Stack
 
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM**: Google `gemma-4-31b-it` via LiveKit's inference gateway (`inference.LLM`, `google/...` route); overridable via `LLM_MODEL` (provider-prefixed). The gateway authenticates against LiveKit Cloud (`LIVEKIT_INFERENCE_API_KEY/SECRET`, falling back to `LIVEKIT_API_KEY/SECRET`), so it needs Cloud creds even when rooms run on the local dev server. Gemma 4 supports tools (`set_style`) + system instructions natively.
+- **LLM**: Google `gemini-3.5-flash` via LiveKit's inference gateway (`inference.LLM`, `google/...` route); overridable via `LLM_MODEL` (provider-prefixed). The gateway authenticates against LiveKit Cloud (`LIVEKIT_INFERENCE_API_KEY/SECRET`, falling back to `LIVEKIT_API_KEY/SECRET`), so it needs Cloud creds even when rooms run on the local dev server. Supports tools (`set_style`) + system instructions, and follows the expressive markup well. NOTE: `gemma-4-31b-it` is **not** on the public inference gateway (returns "no deployment") despite appearing in upstream examples — use the `google` plugin directly if you want Gemma.
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.

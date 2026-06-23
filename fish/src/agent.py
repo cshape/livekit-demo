@@ -255,13 +255,15 @@ class Assistant(Agent):
         self._mode: str = "professional"
         self._mood: str | None = None
         super().__init__(
-            # Gemma 4 (via LiveKit's inference gateway, "google/..." routes to Google)
-            # follows the expressive markup well and supports tools (set_style) +
-            # system instructions natively. Model is env-overridable (provider-prefixed,
-            # e.g. "openai/gpt-4.1-mini") so it can be swapped without a code change.
+            # Gemini 3.5 Flash via LiveKit's inference gateway ("google/..." routes to
+            # Google). Follows the expressive markup well (natural disfluencies + tag
+            # variety) and supports tools (set_style) + system instructions. Model is
+            # env-overridable (provider-prefixed, e.g. "openai/gpt-4.1-mini") via
+            # LLM_MODEL. NOTE: gemma-4-31b-it is NOT on the public inference gateway
+            # (returns "no deployment") — use the google plugin directly for Gemma.
             # Inference auth: LIVEKIT_INFERENCE_API_KEY/SECRET (falls back to
             # LIVEKIT_API_KEY/SECRET) — must be LiveKit Cloud creds, not the dev key.
-            llm=inference.LLM(os.getenv("LLM_MODEL", "google/gemma-4-31b-it")),
+            llm=inference.LLM(os.getenv("LLM_MODEL", "google/gemini-3.5-flash")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

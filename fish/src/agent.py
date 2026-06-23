@@ -653,8 +653,9 @@ class Assistant(Agent):
         if self._mood:
             descriptor += f" with a {self._mood} mood"
         return (
-            f"You're now in {descriptor}. Give ONE short line right now in this new style so "
-            "the user can hear the difference, then carry on the conversation."
+            f"You're now in {descriptor}. Now SPEAK one short line in this new style so the "
+            "user can hear the difference, then carry on. Do NOT call set_style again for this "
+            "request — it's already applied; only call it again when the user asks for a new change."
         )
 
     def llm_node(self, chat_ctx, tools, model_settings):

@@ -966,7 +966,7 @@ wheels = [
 [[package]]
 name = "livekit-agents"
 version = "1.6.0"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-agents&branch=cale%2Fexpressive-fish#7236a519286e9448d3a2fb8e676e47b9ecbb8787" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-agents&branch=cale%2Fexpressive-fish#bb4e2be47b319c3d78f262f77df898e05fd1e0ab" }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
@@ -1108,7 +1108,7 @@ wheels = [
 [[package]]
 name = "livekit-plugins-assemblyai"
 version = "1.6.0"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-assemblyai&branch=cale%2Fexpressive-fish#7236a519286e9448d3a2fb8e676e47b9ecbb8787" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-assemblyai&branch=cale%2Fexpressive-fish#bb4e2be47b319c3d78f262f77df898e05fd1e0ab" }
 dependencies = [
     { name = "livekit-agents" },
 ]
@@ -1116,7 +1116,7 @@ dependencies = [
 [[package]]
 name = "livekit-plugins-fishaudio"
 version = "1.6.0"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-fishaudio&branch=cale%2Fexpressive-fish#7236a519286e9448d3a2fb8e676e47b9ecbb8787" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-fishaudio&branch=cale%2Fexpressive-fish#bb4e2be47b319c3d78f262f77df898e05fd1e0ab" }
 dependencies = [
     { name = "livekit-agents", extra = ["codecs"] },
     { name = "msgpack" },
@@ -1125,7 +1125,7 @@ dependencies = [
 [[package]]
 name = "livekit-plugins-openai"
 version = "1.6.0"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-openai&branch=cale%2Fexpressive-fish#7236a519286e9448d3a2fb8e676e47b9ecbb8787" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-openai&branch=cale%2Fexpressive-fish#bb4e2be47b319c3d78f262f77df898e05fd1e0ab" }
 dependencies = [
     { name = "livekit-agents", extra = ["codecs", "images"] },
     { name = "openai", extra = ["realtime"] },
@@ -1134,7 +1134,7 @@ dependencies = [
 [[package]]
 name = "livekit-plugins-silero"
 version = "1.6.0"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-silero&branch=cale%2Fexpressive-fish#7236a519286e9448d3a2fb8e676e47b9ecbb8787" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-silero&branch=cale%2Fexpressive-fish#bb4e2be47b319c3d78f262f77df898e05fd1e0ab" }
 dependencies = [
     { name = "livekit-agents" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },

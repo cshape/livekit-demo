@@ -29,9 +29,11 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
+  selection: string;
+  onSelectionChange: (selection: string) => void;
 }
 
-export function ViewController({ appConfig }: ViewControllerProps) {
+export function ViewController({ appConfig, selection, onSelectionChange }: ViewControllerProps) {
   const { isConnected, start } = useSessionContext();
 
   return (
@@ -42,6 +44,8 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           key="welcome"
           {...VIEW_MOTION_PROPS}
           startButtonText={appConfig.startButtonText}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
           onStartCall={start}
         />
       )}

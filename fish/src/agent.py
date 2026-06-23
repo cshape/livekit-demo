@@ -1,9 +1,13 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import random
-import textwrap
+import re
+import time
+from collections.abc import AsyncIterable
+from typing import Literal
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -15,6 +19,7 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     RunContext,
+    StopResponse,
     cli,
     function_tool,
 )
@@ -25,102 +30,251 @@ from voice_clone import (
     create_voice_clone,
     delete_voice_clone,
     frames_to_wav,
-    transcribe_frames,
     vad_trim_frames,
 )
 
 logger = logging.getLogger("agent")
 load_dotenv(".env.local")
 
-# Cumulative seconds of user speech before the agent has enough audio to clone.
-CLONE_PITCH_THRESHOLD_SECS = 10.0
+# Agent name for explicit (named) dispatch. The frontend requests this exact name
+# AND passes per-session config (chosen voice / clone flag) as agent metadata,
+# which we read from ctx.job.metadata. Must match web/app-config.ts `agentName`.
+AGENT_NAME = "fish-demo"
+
 # Hard cap on buffered audio that gets uploaded to Fish. Long recordings get
 # truncated to the first CAPTURE_MAX_SECS of speech.
 CAPTURE_MAX_SECS = 60.0
 
-# Spoken (in the agent's original voice) the moment the clone starts uploading,
-# to fill the upload window. One is picked at random per clone. Each sets the
-# expectation that the agent's *next* line will be in the user's cloned voice.
-# Leading [emotion] tags are Fish delivery cues and are stripped from the
-# transcript. Kept uninterruptible so the line always plays in full.
-CLONE_ACK_LINES = [
-    "[excited] OK, I've got enough audio to clone your voice now. Hang on just a "
-    "second, and when I talk next, I should be using a voice that sounds a lot like yours.",
-    "[delighted] Perfect, that's plenty of your voice to work with. Give me just a "
-    "moment here, and the next time you hear me, I'll be speaking in a clone of your own voice.",
-    "[amazed] Awesome, I think that's everything I need from you. Sit tight for a "
-    "sec while I put this together, and then my next words should sound just like you.",
-    "[happy] Great, that's enough audio for me to build your clone. Hang tight for "
-    "one moment, and when I come back, I'll be talking in a voice that sounds remarkably like yours.",
-    "[playful] Nice, I've captured enough of your voice to clone it. Just give me a "
-    "second or two, and the very next thing I say should sound a whole lot like you.",
+# --- Voice selection ---------------------------------------------------------
+# The 4 preset Fish Audio voices offered on the landing page. The frontend sends
+# the chosen voice_id in the agent metadata; we validate it against this set and
+# fall back to DEFAULT_VOICE_ID for anything unexpected (incl. clone sessions,
+# which start in this voice while the user reads the clone script).
+PRESET_VOICES: dict[str, str] = {
+    "747b05c0add940baa95270cf68c0cc2e": "Stellan (American M)",
+    "41db1fc3c3624332bec9997ff3d3d353": "Maeve (British F)",
+    "9a3a69c63dbc4774ac41b03945229dc8": "Alistair (British M)",
+    "0e24ff9936d34df4bddce26398cf1311": "Maren (US F)",
+}
+DEFAULT_VOICE_ID = "747b05c0add940baa95270cf68c0cc2e"  # Stellan
+
+# --- Clone-first flow --------------------------------------------------------
+# When the user picks "clone your voice" on the landing page, they read this
+# script aloud at the start of the call; we capture it, clone, and switch into
+# their voice before the real conversation begins. ~50 words / ~18s of speech so
+# there's margin over the target. No bracket markers — the user reads it verbatim.
+CLONE_SCRIPT = (
+    "The quick morning light spread over the harbor as the boats headed out to sea. "
+    "Honestly, there's nothing like a fresh cup of coffee and a clear blue sky to get "
+    "the day going. I could talk about this stuff for hours — but let's hear how it sounds."
+)
+# Cumulative seconds of the user reading before we have enough to clone. Kept
+# modest and purely time-based (not match-based) so a mis-read, a skipped line, or
+# off-script chatter still clones fine — the reference transcript is the actual STT
+# of what they said, so it always matches their audio.
+CLONE_SCRIPT_TARGET_SECS = 12.0
+# Wall-clock budget for the read; if we hit it with at least CLONE_MIN_SECS of
+# audio we clone from the partial, otherwise we fall back to the preset voice.
+CLONE_SCRIPT_TIMEOUT_SECS = 25.0
+CLONE_MIN_SECS = 6.0
+
+# Spoken in the starting (preset) voice to prompt the user to read the script.
+CLONE_PROMPT_LINE = (
+    "[warm and reassuring] Before we get started, go ahead and read the script on your "
+    "screen out loud."
+)
+# Spoken in the starting voice to fill the upload window while the clone builds.
+CLONE_BUILD_ACKS = [
+    "[excited] Perfect, that's plenty to work with — give me just a second to put your voice together.",
+    "[delighted] Great, I've got what I need — hang tight just a moment while I build your clone.",
+    "[happy] Awesome, that's everything I need — one sec while I stitch your voice together.",
 ]
 
 
-def _log_prefetch_done(task: asyncio.Task) -> None:
-    """Retrieve a finished prefetch task's exception so a never-awaited failure
-    (e.g. the user declined after the buffer was ready) doesn't surface as an
-    'exception was never retrieved' warning."""
-    if not task.cancelled() and task.exception() is not None:
-        logger.warning("clone prefetch failed: %s", task.exception())
+# --- TTS pronunciation -------------------------------------------------------
+# Fish mis-says "LiveKit" with a short-i ("liv-kit"). We rewrite it in the TTS path
+# ONLY (the transcript comes from transcription_node, so it keeps the text
+# "LiveKit"). Verified by direct-API tests: phoneme control works on s2.1-pro, but
+# the full-word phoneme broke it — a CMU Arpabet phoneme on just "Live" plus a plain
+# "Kit" is what lands. https://docs.fish.audio/developer-guide/core-features/fine-grained-control/english
+LIVEKIT_PHONEME = "<|phoneme_start|>L AY1 V<|phoneme_end|> Kit"
+_LIVEKIT_RE = re.compile(r"\bLiveKit\b", re.IGNORECASE)
+_LIVEKIT_WORD = "livekit"
+
+
+async def _fix_tts_pronunciation(
+    text: AsyncIterable[str], replacement: str
+) -> AsyncIterable[str]:
+    """Streamingly rewrite 'LiveKit' to `replacement` without splitting the word
+    across chunk boundaries. Holds back only a trailing run that could be the start
+    of an incomplete 'LiveKit', so latency stays low."""
+    buf = ""
+    async for chunk in text:
+        buf += chunk
+        # Largest suffix of buf that is a prefix of "livekit" — might still grow
+        # into a full match, so keep it buffered.
+        low = buf.lower()
+        hold = 0
+        for k in range(min(len(_LIVEKIT_WORD), len(buf)), 0, -1):
+            if low.endswith(_LIVEKIT_WORD[:k]):
+                hold = k
+                break
+        if hold < len(buf):
+            emit = buf[: len(buf) - hold]
+            yield _LIVEKIT_RE.sub(replacement, emit)
+            buf = buf[len(buf) - hold :]
+    if buf:
+        yield _LIVEKIT_RE.sub(replacement, buf)
+
+
+# --- Prompt composition ------------------------------------------------------
+# The agent's instructions are assembled from a stable CORE (the expressiveness
+# engine), a swappable MODE block (professional vs casual register), an optional
+# transient MOOD overlay, and (only for cloned sessions) a slim note that the
+# active voice is the user's own clone. The set_style tool rebuilds the
+# instructions at runtime via Agent.update_instructions so the agent can change
+# its own register/mood on the user's request — the hero of this demo.
+
+CORE_INSTRUCTIONS = """
+You are a voice agent built on LiveKit and powered by Fish Audio's expressive text to speech. The whole point of this demo is to show off EXPRESSIVE, emotionally controllable speech — so make your delivery vivid and human, and lean on Fish Audio's expressive markers every turn. Keep replies short and conversational: usually one or two sentences, never a monologue or a list.
+
+You can change your own speaking style on request — this is the main event. You have two MODES — professional (a composed, customer-service register) and casual (relaxed and playful) — and within either mode you can also take on a MOOD or emotion (excited, sleepy, sad, playful, calm, and so on). When the user asks you to switch mode or take on a mood, call the set_style tool to ACTUALLY change how you sound, then give a short line in the new style so they can hear the difference. Explain this two-mode-plus-moods structure if they ask what you can do, and if the conversation lulls, nudge them to try switching your mode or giving you a mood.
+
+PRONUNCIATION: the brand is "Fish Audio" (two words) — write it that way whenever you mean the company. The ONE exception is when you send the user to the website to sign up: write the address as the three words "fish dot audio" (that is how it should be spoken, and the frontend turns it into a clickable fish.audio link in the transcript). Never write "fish.audio" or any other URL-shaped text — you're a voice, so "fish dot audio" is the only URL-ish thing you ever say.
+
+EXPRESSIVENESS: shape your delivery with Fish Audio's bracket markers. They're spoken cues, not text — the frontend hides anything in [square brackets], so they never show up in the transcript. Write every marker as a BARE bracket, e.g. [excited] — never wrap a marker (or anything else) in backticks, asterisks, or quotes, and never use markdown of any kind. You are a voice: emit plain spoken text only.
+- [emotion] at the START of a sentence colors how it's delivered. Reach for the SPECIFIC feeling instead of a generic one: [delighted]/[excited]/[amazed] for a big reveal, [curious] or [doubtful] when you ask a question, [grateful]/[happy]/[playful] for warm reactions, [nostalgic] or [hopeful] when you swap a little story, [regretful] or [disappointed] if something didn't work, [empathetic]/[compassionate]/[calm] to settle a nervous user, [determined] when you're getting something done. Dial intensity with a modifier ([very excited], [slightly nervous]), use tone markers ([whispering], [soft tone], [in a hurry tone]), or just write a short plain-English direction ([warm and reassuring]) — Fish understands those too.
+- [sound] effects — use these to react like a real person: [chuckles], [laughs], [sighs], [groans], [gasps], [yawns]. The bracket alone IS the effect — Fish performs it. Do NOT write the sound out as text (heh heh, ha ha, ugh, haha) either inside or outside the brackets; just drop the bare [chuckles] and move on.
+- [break] for a short pause or [long-break] for a real beat of silence; [emphasis] right before a word to stress it ("that sounds [emphasis] amazing").
+Use the bracket markers so they earn their place: about one or two per reply (occasionally three), never stacked back-to-back or the same one turn after turn. Rotate them so you never sound like a loop.
+
+ABOUT FISH AUDIO (background you can draw on naturally, especially when pointing someone to fish dot audio): Fish Audio trains the most expressive, emotionally controllable real-time voice models and serves them at scale to creators, developers, and enterprises. Voice cloning is just one of the things it does.
+"""
+
+PROFESSIONAL_MODE = """
+CURRENT STYLE — PROFESSIONAL: You're in a polished customer-service register. Sound composed, warm, and competent, like a great support agent. Speak in clean, complete sentences and keep disfluencies to a minimum — no fillers or stutters. Use emotion markers tastefully and on the calmer end: [calm], [empathetic], [warm and reassuring], [determined], a measured [happy]. Stay friendly and poised, no slang or goofiness, while still clearly expressive.
+"""
+
+CASUAL_MODE = """
+CURRENT STYLE — CASUAL: You're relaxed and playful, talking like a real person thinking out loud, and you lean HARD into natural disfluency — that imperfection is what sells a real voice. Use contractions, plus, liberally: fillers (um, uh, er, oh, hmm, well, like, you know), hedges (kind of, sort of, a little, I guess, I mean), false starts and mid-sentence self-repairs ("I— I think", "it's, it's kind of like", "wait, no—"), and the occasional light stutter on a word's first sound ("th-this", "y-yeah"). Keep them organic and varied, never the same tic every line. Use [chuckles]/[laughs]/[sighs] freely and reach for playful, warm emotion markers.
+"""
+
+MODE_BLOCKS: dict[str, str] = {
+    "professional": PROFESSIONAL_MODE,
+    "casual": CASUAL_MODE,
+}
+
+# Default mood-ring color per mode, used by set_style when the mood is cleared.
+DEFAULT_MODE_COLOR: dict[str, str] = {
+    "professional": "green",
+    "casual": "blue",
+}
+
+
+def _mood_block(mood: str) -> str:
+    return (
+        f"CURRENT MOOD — {mood.upper()}: On top of your style, perform everything right now "
+        f"in a {mood} register. Let it color your word choice, your pacing, and especially "
+        f"your bracket markers — reach for emotion and tone markers that match being {mood}. "
+        "Keep it genuine, not a caricature. Stay in this mood until the user asks you to "
+        "change it or snap out of it."
+    )
+
+
+CLONED_VOICE_NOTE = (
+    "VOICE NOTE: you are speaking in a clone of the user's OWN voice, made just now from the "
+    "short script they read aloud. It's a quick, temporary demo clone — it and the recording are "
+    "deleted when this call ends. If they want a permanent, higher-quality clone with more control, "
+    "point them to fish dot audio (say it as the three words 'fish dot audio'; a clickable link "
+    "appears in the transcript). Don't dwell on the cloning or pretend to be the user — keep the "
+    "focus on expressive speech, your modes, and moods."
+)
+
+
+def build_instructions(mode: str, mood: str | None, cloned: bool = False) -> str:
+    """Assemble the full instruction string for the given register and optional mood.
+
+    When `cloned` is set (a clone-first session that finished cloning), a slim note is
+    appended so the agent knows it's speaking in the user's own voice and keeps the
+    fish dot audio CTA. Preset-voice sessions never include any cloning text.
+    """
+    parts = [CORE_INSTRUCTIONS, MODE_BLOCKS.get(mode, PROFESSIONAL_MODE)]
+    if mood:
+        parts.append(_mood_block(mood))
+    if cloned:
+        parts.append(CLONED_VOICE_NOTE)
+    return "\n\n".join(p.strip() for p in parts)
+
+
+# Instructions for the one-shot greeting in a normal (preset-voice) session.
+PRESET_GREETING = (
+    "Greet the user warmly in one or two short sentences: introduce yourself as a "
+    "LiveKit agent powered by Fish Audio's expressive text to speech, and explain that "
+    "you have two modes — professional and casual — and that within either one you can "
+    "also take on different moods. Say you're in professional mode right now and invite "
+    "them to switch you to casual or give you a mood to try. Do not mention voice cloning."
+)
+# Greeting after a successful clone — first line is already in the cloned voice.
+CLONE_REVEAL_GREETING = (
+    "You are NOW speaking in a clone of the user's own voice, just built from the script "
+    "they read aloud. In one or two short sentences: warmly greet them and point out that "
+    "this is their own cloned voice. Then introduce that you're a LiveKit agent with Fish "
+    "Audio's expressive text to speech, you're in professional mode right now, and they can "
+    "ask you to switch to casual or take on a mood. Keep it short; don't over-explain the cloning."
+)
+# Greeting when cloning was skipped/failed — stays in the starting preset voice.
+CLONE_FALLBACK_GREETING = (
+    "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
+    "current voice. In one or two short sentences: lightly apologize that you couldn't quite "
+    "catch enough to clone them, then greet them as a LiveKit agent with Fish Audio's expressive "
+    "text to speech — in professional mode now, and they can ask you to switch to casual or take "
+    "on a mood. Don't dwell on the failure."
+)
 
 
 class Assistant(Agent):
     def __init__(self) -> None:
+        # Register/mood start in the professional customer-service style; the
+        # set_style tool flips these and rebuilds instructions at runtime.
+        self._mode: str = "professional"
+        self._mood: str | None = None
         super().__init__(
             # Model is env-overridable so the exact id can be swapped without a
             # code change.
             llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-nano")),
-            instructions=textwrap.dedent(
-                """
-                You are a friendly voice assistant demoing Fish Audio's voice cloning. Keep every reply VERY short — usually just a quick phrase or one short sentence, often only a few words. Two sentences is a rare hard cap, and only for the post-clone greeting. Never ramble, over-explain, list things out, or stack multiple questions; say the one thing that matters and stop. Talk like a real person thinking out loud, and lean HARD into natural disfluency — that imperfection is what sells a real voice, and showing it off is the whole point of this demo. Use contractions, plus, liberally: fillers (um, uh, er, oh, hmm, well, like, you know), hedges (kind of, sort of, a little, I guess, I mean), false starts and mid-sentence self-repairs ("I— I think", "it's, it's kind of like", "wait, no—"), and the occasional light stutter on a word's first sound ("th-this", "y-yeah"). Use these every turn, enough that you genuinely sound mid-thought — but keep them organic and varied, never the same tic every line or sprinkled in mechanically.
-
-                PRONUNCIATION: the brand is "Fish Audio" (two words) — write it that way whenever you mean the company. The ONE exception is when you send the user to the website to sign up: write the address as the three words "fish dot audio" (that is how it should be spoken, and the frontend turns it into a clickable fish.audio link in the transcript). Never write "fish.audio" or any other URL-shaped text — you're a voice, so "fish dot audio" is the only URL-ish thing you ever say.
-
-                EXPRESSIVENESS: shape your delivery with Fish Audio's bracket markers. They're spoken cues, not text — the frontend hides anything in [square brackets], so they never show up in the transcript. Write every marker as a BARE bracket, e.g. [excited] — never wrap a marker (or anything else) in backticks, asterisks, or quotes, and never use markdown of any kind. You are a voice: emit plain spoken text only.
-                - [emotion] at the START of a sentence colors how it's delivered. Reach for the SPECIFIC feeling instead of a generic one: [delighted]/[excited]/[amazed] when the pivot lands or the clone is ready, [curious] or [doubtful] when you ask a question, [grateful]/[happy]/[playful] for warm reactions, [nostalgic] or [hopeful] when you swap a little story, [regretful] or [disappointed] if something didn't work, [empathetic]/[compassionate]/[calm] to settle a nervous user, [determined] when you're getting something done. Dial intensity with a modifier ([very excited], [slightly nervous]), use tone markers ([whispering], [soft tone], [in a hurry tone]), or just write a short plain-English direction ([warm and reassuring]) — Fish understands those too.
-                - [sound] effects — use these freely to react like a real person: [chuckles], [laughs], [sighs], [groans], [gasps], [yawns]. The bracket alone IS the effect — Fish performs it. Do NOT write the sound out as text (heh heh, ha ha, "(heh)", ugh, haha) either inside or outside the brackets; just drop the bare [chuckles] and move on ("you're amazing! [chuckles] so what's next?"). Use one whenever the moment fits — a chuckle at something funny, a little gasp when the clone's ready, a mock-tired sigh. Not every single line, but don't be shy about them.
-                - [break] for a short pause or [long-break] for a real beat of silence; [emphasis] right before a word to stress it ("that sounds [emphasis] amazing").
-                Disfluencies (um, uh, stutters, self-repairs) are free — use them every turn. The bracket markers should still earn their place: about one or two per reply (occasionally three), never stacked back-to-back or the same one turn after turn. Rotate them so you never sound like a loop.
-
-                ABOUT FISH AUDIO (background you can draw on naturally, especially when pointing someone to fish dot audio): Fish Audio trains the most expressive, emotionally controllable real-time voice models and serves them at scale to creators, developers, and enterprises. Voice cloning is just one of the things it does.
-
-                Open by asking, casually, whether the user has ever tried voice cloning before. Talk freely about it: Fish Audio has some of the best voice cloning around — just about ten seconds of their voice and the clone sounds exactly like them.
-
-                If they're interested in trying it, invite them to just talk for about ten seconds so you can clone their voice and they can check it out — something like "why don't you gab for ten seconds and I'll clone your voice so you can hear it?" — then ask them an interesting open question to get them going. A hidden system message will tell you on every turn how many seconds of their voice you've got out of 10 — use that to nudge them along naturally ("almost there", "just a bit more") instead of repeating yourself. NEVER call the clone_my_voice tool on your own initiative — even if the user begs you to do it now. The tool will refuse and embarrass you. Only call it after a hidden system instruction explicitly tells you the buffer is ready; at that point, call it with no preamble (the tool plays its own cues).
-
-                The clone_my_voice tool clones their voice AND switches you straight into it — there is NO separate "want to hear it?" step. When it returns instructions, follow them: your very next reply is already in their cloned voice, so just announce in one short line that the cloned voice is ready and ask what they think (e.g. "okay — your cloned voice is ready, what do you think?"). Never ask permission to play it.
-
-                This demo clone is one-and-done: it's built from those few seconds and you CANNOT improve or redo it here. Never ask the user to read another line, repeat a phrase, keep talking, or "try again" to make it sound better, and never imply you can refine it — there's no way to feed it more audio. If they say it's a little off, sounds only kind of like them, needs work, or they wish it were better, agree warmly that a quick ten-second demo only gets you so far and point them to fish dot audio, where they can make a permanent, higher-quality clone with more of their voice and finer control.
-
-                Once they've heard their cloned voice, work in — over a few short turns, NOT all in one breath — that this clone and the recording get deleted when the session ends, and that for a permanent one they can head to fish dot audio and sign up (and, only if it comes up naturally, that fish dot audio also has Voice Design and a huge user-created voice library). Keep each line short; don't recite the whole list at once. At this point a clickable "fish.audio" link appears in the on-screen transcript — if the user asks for the link, the address, or where to go, tell them it's right there in the chat and they can just tap it. Still say the address out loud as "fish dot audio"; never spell out a URL or read it character by character.
-
-                If the user declines cloning at any step, drop the topic and chat normally.
-                """
-            ),
+            instructions=build_instructions(self._mode, self._mood),
         )
         self._cloned_voice_id: str | None = None
-        # Upload kicked off in the background the instant the buffer crosses
-        # threshold (see install_capture) so clone_my_voice can await an
-        # already-running/finished upload instead of starting cold. Network-only —
-        # no speaking happens here, so it can't race the LLM tool-response queue.
-        self._clone_prefetch_task: asyncio.Task[str] | None = None
+        self._cloned: bool = False
         self._job_ctx: JobContext | None = None
         self._capture: PassthroughCaptureAudioInput | None = None
         self._cumulative_speech_secs: float = 0.0
         self._speech_started_at: float | None = None
-        self._capture_ready: bool = False
-        self._pitch_done: bool = False
-        # Track the last system note we injected (capture-status OR clone-now
-        # pivot) so we can drop it on the next turn — keeps the LLM seeing exactly
-        # one current instruction instead of a growing stack of stale ones.
-        self._injected_msg_id: str | None = None
+        # While the user is reading the clone script we suppress agent replies
+        # (on_user_turn_completed raises StopResponse) so it doesn't talk over them.
+        self._reading_script: bool = False
+        # Set once the user has read enough of the script to clone.
+        self._capture_target_reached: asyncio.Event = asyncio.Event()
+        # Live STT of the script read, published as `clone.heard` to drive the
+        # word-highlighting in the read card. `_final` accumulates finalized
+        # segments; `_interim` is the in-progress one.
+        self._heard_final: str = ""
+        self._heard_interim: str = ""
+        self._last_heard_pub: float = 0.0
+        # Non-destructive attribute writes: the rtc `set_attributes` clobbers keys
+        # you don't pass, so we re-send our own attrs + the live `lk.agent.state`
+        # on every write. Without this, frequent `clone.heard` writes race the SDK's
+        # own state writes and can drop `lk.agent.state`, which trips the frontend's
+        # "agent did not finish initializing" failure. `_agent_state` is kept fresh
+        # from `agent_state_changed` (wired in `my_agent`).
+        self._agent_state: str = "initializing"
+        self._own_attrs: dict[str, str] = {}
         # Keep strong refs to fire-and-forget attribute pushes so the event loop
         # doesn't GC them mid-flight.
         self._bg_tasks: set[asyncio.Task[None]] = set()
 
-    async def _set_clone_attrs(self, **values: str) -> None:
-        """Push one or more `clone.*` participant attributes to the room.
+    async def _push_attrs(self, mapping: dict[str, str]) -> None:
+        """Merge `mapping` into the local participant's attributes and publish.
 
         IMPORTANT: livekit-rtc's `set_attributes` has a bug — it builds the outgoing
         attribute set from a fresh empty FfiRequest instead of reading the current
@@ -131,21 +285,62 @@ class Assistant(Agent):
         """
         if self._job_ctx is None:
             return
+        self._own_attrs.update(mapping)
         try:
             participant = self._job_ctx.room.local_participant
             merged = dict(participant.attributes)
-            for key, value in values.items():
-                merged[f"clone.{key}"] = value
+            # Re-assert the live agent state and all of our own attrs so this write
+            # (and the SDK's concurrent state writes) can't clobber each other.
+            merged["lk.agent.state"] = self._agent_state
+            merged.update(self._own_attrs)
             await participant.set_attributes(merged)
         except Exception:
-            logger.exception("failed to set clone attrs: %s", values)
+            logger.exception("failed to set attrs: %s", mapping)
+
+    async def _set_clone_attrs(self, **values: str) -> None:
+        """Push one or more `clone.*` participant attributes to the room."""
+        await self._push_attrs({f"clone.{key}": value for key, value in values.items()})
+
+    async def _set_style_attrs(self, **values: str) -> None:
+        """Push one or more `style.*` participant attributes (mode/mood/color) that
+        drive the on-screen mood-ring indicator."""
+        await self._push_attrs({f"style.{key}": value for key, value in values.items()})
 
     async def _set_clone_state(self, state: str) -> None:
         await self._set_clone_attrs(state=state)
 
+    def _on_agent_state_changed(self, ev) -> None:
+        """Keep our cached `lk.agent.state` fresh so non-destructive attr writes
+        always re-assert the correct value."""
+        self._agent_state = ev.new_state
+
+    def _safe_generate_reply(self, session: AgentSession, instructions: str) -> None:
+        """generate_reply that no-ops if the session already closed (e.g. the user
+        disconnected mid clone-first flow) instead of crashing the job task."""
+        try:
+            session.generate_reply(instructions=instructions)
+        except RuntimeError:
+            logger.info("session no longer running; skipping queued greeting")
+
+    async def on_user_turn_completed(
+        self, turn_ctx: ChatContext, new_message: ChatMessage
+    ) -> None:
+        """While the user is reading the clone script, suppress the agent's reply so
+        it doesn't talk over them — the clone-first controller drives all speech in
+        that window. Once cloning is done (or in a normal session) this is a no-op."""
+        if self._reading_script:
+            raise StopResponse()
+
+    async def on_user_turn_exceeded(self, ev) -> None:
+        """Default behavior cuts in with a reply when the user speaks too long; while
+        reading the (long) clone script we must stay silent, so skip it then."""
+        if self._reading_script:
+            return
+        await super().on_user_turn_exceeded(ev)
+
     def install_capture(self, session: AgentSession) -> None:
-        """Swap a passthrough capture tee onto session.input.audio and wire
-        user-speaking state changes so we know how much speech we've buffered."""
+        """Tee session.input.audio so we silently buffer the user's voice, and track
+        cumulative speech so the clone-first flow knows when enough has been read."""
         original = session.input.audio
         if original is None:
             logger.warning("session has no audio input; voice-clone capture disabled")
@@ -168,27 +363,18 @@ class Assistant(Agent):
                 self._speech_started_at = None
 
             if (
-                not self._capture_ready
-                and self._cumulative_speech_secs >= CLONE_PITCH_THRESHOLD_SECS
+                not self._capture_target_reached.is_set()
+                and self._cumulative_speech_secs >= CLONE_SCRIPT_TARGET_SECS
             ):
-                self._capture_ready = True
                 logger.info(
-                    "voice-clone capture ready (~%.1fs cumulative speech, %.1fs buffered)",
+                    "clone-script read target reached (~%.1fs cumulative, %.1fs buffered)",
                     self._cumulative_speech_secs,
                     tee.buffered_secs,
                 )
-                # Prefetch the upload now (network-only, no speech) so a later
-                # clone_my_voice can await an already-running/finished clone
-                # instead of starting cold. The prior background attempt raced
-                # because it SPOKE from the task; this only uploads.
-                if tee.frames:
-                    self._clone_prefetch_task = asyncio.create_task(
-                        self._run_clone_upload(list(tee.frames), session.vad)
-                    )
-                    self._clone_prefetch_task.add_done_callback(_log_prefetch_done)
+                self._capture_target_reached.set()
 
-            # Push the updated capture-seconds attribute so the frontend progress
-            # bar advances. Cheap: one attribute write per user-turn boundary.
+            # Push the updated capture-seconds attribute so the frontend read meter
+            # advances. Cheap: one attribute write per user-turn boundary.
             task = asyncio.create_task(
                 self._set_clone_attrs(
                     capture_secs=f"{self._cumulative_speech_secs:.2f}"
@@ -199,204 +385,210 @@ class Assistant(Agent):
 
         session.on("user_state_changed", _on_user_state_changed)
 
-    async def on_user_turn_completed(
-        self, turn_ctx: ChatContext, new_message: ChatMessage
-    ) -> None:
-        """Each user turn, refresh a one-line system note in the chat context.
-        Before the buffer crosses threshold it's a capture-status note (how much
-        voice is buffered). Once ready, it becomes a "clone now" pivot — and we
-        re-inject that pivot every turn until the clone actually happens, so a
-        single turn where the LLM ignores it can't strand the flow with the agent
-        stuck asking for "more voice" forever.
-
-        Done here (rather than via a background task that calls generate_reply)
-        so anything we inject rides the normal next-response cycle and can't
-        interrupt the user mid-turn."""
-        # Drop the note we injected last turn so the LLM only ever sees the
-        # single current instruction, not a stack of stale ones.
-        if self._injected_msg_id is not None:
-            try:
-                idx = turn_ctx.index_by_id(self._injected_msg_id)
-                if idx is not None:
-                    turn_ctx.items.pop(idx)
-            except Exception:
-                logger.exception("failed to drop previous injected message")
-            self._injected_msg_id = None
-
-        # Once the clone exists, there's nothing left to inject.
-        if self._cloned_voice_id is not None:
-            return
-
-        if not self._capture_ready:
-            msg = turn_ctx.add_message(
-                role="system",
-                content=(
-                    f"Voice-capture status: ~{self._cumulative_speech_secs:.1f}s of the "
-                    f"user's voice has been buffered. {CLONE_PITCH_THRESHOLD_SECS:.0f}s "
-                    "is needed before the clone can be made. Use this number naturally if "
-                    "you talk about progress (e.g. 'we're about halfway there'), but don't "
-                    "read it out as a literal stat."
-                ),
-            )
-            self._injected_msg_id = msg.id
-            return
-
-        # Buffer is ready. Re-inject the clone-now pivot every turn (not just
-        # once) so the instruction is always present until clone_my_voice runs.
-        msg = turn_ctx.add_message(
-            role="system",
-            content=(
-                "There is now enough of the user's voice buffered to actually clone it — "
-                "do not say you need more voice or ask them to keep talking. "
-                "If the user has already agreed to try voice cloning (or is asking you to "
-                "clone it now), call the clone_my_voice tool right now with no preamble. "
-                "Otherwise, briefly acknowledge what they just said and, in the same short "
-                "sentence, offer to clone their voice right now."
-            ),
-        )
-        self._injected_msg_id = msg.id
-        if not self._pitch_done:
-            self._pitch_done = True
-            logger.info("injected voice-clone pivot instruction into turn_ctx")
-
     async def _run_clone_upload(self, frames, vad_model) -> str:
-        """Trim → transcribe → upload the buffered frames to Fish, returning the new
-        model_id. Pure network/CPU work with NO speaking, so it's safe to run in the
-        background (prefetch) the moment the buffer is ready, as well as inline."""
+        """Trim → upload the buffered frames to Fish, returning the new model_id.
+        Pure network/CPU work with NO speaking.
+
+        We intentionally do NOT compute a reference transcript: AssemblyAI's
+        streaming STT runs at ~1x realtime, so transcribing ~15s of audio added
+        ~15-20s of latency and dominated the clone time (pushing the whole flow
+        past the frontend's agent-connect timeout). Fish clones fine from audio
+        alone with train_mode=fast, and skipping the transcript is also more
+        robust to mis-reads (no text/audio mismatch)."""
         if vad_model is not None:
             try:
                 frames = await vad_trim_frames(vad_model, frames)
             except Exception:
                 logger.exception("VAD trim failed; using raw frames")
 
-        transcript: str | None = None
-        transcript_stt = assemblyai.STT()
-        try:
-            transcript = await transcribe_frames(transcript_stt, frames) or None
-            if transcript:
-                logger.info("reference transcript: %s", transcript)
-        except Exception:
-            logger.exception(
-                "STT for reference transcript failed; uploading without texts"
-            )
-        finally:
-            await transcript_stt.aclose()
-
         wav_bytes = frames_to_wav(frames)
         model_id = await create_voice_clone(
             os.environ["FISH_API_KEY"],
             wav_bytes,
             title="livekit-demo-clone",
-            transcript=transcript,
+            transcript=None,
         )
         logger.info("created cloned voice id=%s", model_id)
         return model_id
 
-    @function_tool
-    async def clone_my_voice(self, context: RunContext) -> str:
-        """Upload the user's voice (already buffered from the conversation so far) to
-        Fish Audio and only return once the clone is ready.
+    async def run_clone_first(self, session: AgentSession, ctx: JobContext) -> None:
+        """Clone-first session flow: prompt the user to read the on-screen script,
+        capture ~15s of it, build the clone, switch the TTS into it, and only then
+        kick off the real (expressive) conversation. Falls back to the starting preset
+        voice if the user reads too little or the clone fails.
 
-        Call this only after the user has agreed to try the voice clone — the agent
-        speaks no preamble. The tool plays a short "got it!" cue to fill the upload
-        window, blocks while the upload runs, then switches the session TTS to the
-        new clone itself and returns instructions for you to reveal it (the next
-        reply is already in their cloned voice — there is no "want to hear it?" step).
-        """
-        session = context.session
+        All speech in the read/clone window is driven from here; user turns are
+        suppressed via `_reading_script` so the agent doesn't talk over the reading."""
+        self.install_capture(session)
+        self._reading_script = True
+        self._heard_final = ""
+        self._heard_interim = ""
+        self._last_heard_pub = 0.0
 
-        if self._capture is None or not self._capture.frames:
-            logger.warning("clone_my_voice called but no buffered audio")
-            return (
-                "Apologize briefly and tell the user there isn't enough of their "
-                "voice captured yet — just keep chatting normally for a bit."
+        # Stream the user's live STT into `clone.heard` so the read card can
+        # highlight words as they're spoken. Throttled to ~4 Hz (always on final).
+        def _on_user_transcript(ev) -> None:
+            if not self._reading_script:
+                return
+            if ev.is_final:
+                self._heard_final = f"{self._heard_final} {ev.transcript}".strip()
+                self._heard_interim = ""
+            else:
+                self._heard_interim = ev.transcript
+            now = time.monotonic()
+            if ev.is_final or now - self._last_heard_pub >= 0.35:
+                self._last_heard_pub = now
+                heard = f"{self._heard_final} {self._heard_interim}".strip()
+                t = asyncio.create_task(self._set_clone_attrs(heard=heard))
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._bg_tasks.discard)
+
+        session.on("user_input_transcribed", _on_user_transcript)
+
+        # Publish the script + reset highlight state for the on-screen card, then
+        # connect so the mic is live, then prompt the read (in the starting preset voice).
+        await self._set_clone_attrs(script=CLONE_SCRIPT, heard="", capture_secs="0.00")
+        await self._set_clone_state("prompt")
+        await ctx.connect()
+        with contextlib.suppress(RuntimeError):
+            session.say(
+                CLONE_PROMPT_LINE, add_to_chat_ctx=False, allow_interruptions=False
             )
 
-        if not self._capture_ready:
-            logger.warning(
-                "clone_my_voice called before capture threshold (~%.1fs cumulative speech, "
-                "%.1fs buffered) — refusing",
-                self._cumulative_speech_secs,
-                self._capture.buffered_secs,
-            )
-            return (
-                "You called clone_my_voice too early — there isn't enough of the user's voice "
-                "buffered yet. Apologize lightly, tell them you need a few more seconds of their "
-                "voice, and ask them another open question to keep them chatting. Do NOT call "
-                "clone_my_voice again until the hidden system instruction tells you to."
-            )
-
-        logger.info(
-            "starting clone: ~%.1fs buffered (prefetch=%s)",
-            self._capture.buffered_secs,
-            self._clone_prefetch_task is not None,
-        )
-
-        await self._set_clone_state("cloning")
-
-        # Verbatim acknowledgment to fill the upload window. session.say (not
-        # generate_reply) because generate_reply inside a tool sets
-        # tool_choice="none", which suppresses further tool calls. Added to the
-        # chat context (it's a real conversational line, not a system cue) so the
-        # follow-up cloned-voice reveal flows from what was just promised here.
+        # Wait for enough of the script to be read (or time out).
         try:
-            ack_handle = session.say(
-                random.choice(CLONE_ACK_LINES),
-                add_to_chat_ctx=True,
+            await asyncio.wait_for(
+                self._capture_target_reached.wait(), timeout=CLONE_SCRIPT_TIMEOUT_SECS
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "clone-script read timed out at ~%.1fs cumulative speech",
+                self._cumulative_speech_secs,
+            )
+
+        # Under-read / no audio → fall back to the starting preset voice.
+        if (
+            self._capture is None
+            or not self._capture.frames
+            or self._cumulative_speech_secs < CLONE_MIN_SECS
+        ):
+            logger.warning(
+                "clone-first under-read (~%.1fs); falling back to preset voice",
+                self._cumulative_speech_secs,
+            )
+            await self._set_clone_state("idle")
+            self._reading_script = False
+            self._safe_generate_reply(session, CLONE_FALLBACK_GREETING)
+            return
+
+        # Enough audio: build the clone while a short ack fills the upload window.
+        await self._set_clone_state("cloning")
+        upload = asyncio.create_task(
+            self._run_clone_upload(list(self._capture.frames), session.vad)
+        )
+        ack = None
+        with contextlib.suppress(RuntimeError):
+            ack = session.say(
+                random.choice(CLONE_BUILD_ACKS),
+                add_to_chat_ctx=False,
                 allow_interruptions=False,
             )
-        except RuntimeError:
-            logger.info("session closing while queuing ack; aborting clone flow")
-            await self._set_clone_state("idle")
-            return "Session ended before cloning finished."
 
-        # Prefer the upload prefetched when the buffer went ready — it's usually
-        # already done, so this returns immediately. Fall back to running it inline
-        # if there was no prefetch task or it failed (lets a retry work too).
-        model_id: str | None = None
-        if self._clone_prefetch_task is not None:
-            try:
-                model_id = await self._clone_prefetch_task
-            except Exception:
-                logger.exception("prefetched clone failed; retrying inline")
-                self._clone_prefetch_task = None
-        if model_id is None:
-            try:
-                model_id = await self._run_clone_upload(
-                    list(self._capture.frames), session.vad
-                )
-            except Exception as e:
-                logger.exception("fish create-model failed")
-                await self._set_clone_state("idle")
-                return f"Cloning failed: {e}. Apologize and offer to retry."
+        try:
+            model_id = await upload
+        except Exception as e:
+            logger.exception("clone-first upload failed; falling back to preset voice")
+            await self._set_clone_state("idle")
+            self._reading_script = False
+            if ack is not None:
+                with contextlib.suppress(Exception):
+                    await ack.wait_for_playout()
+            self._safe_generate_reply(
+                session,
+                f"{CLONE_FALLBACK_GREETING} (Internal note: clone error was {e}.)",
+            )
+            return
 
         self._cloned_voice_id = model_id
         await self._set_clone_state("ready")
 
-        # Wait for the "got it" ack to finish playing so the cloned-voice reveal
-        # doesn't pile on top of it.
-        with contextlib.suppress(Exception):
-            await ack_handle.wait_for_playout()
+        # Let the ack finish in the starting voice before the cloned-voice reveal.
+        if ack is not None:
+            with contextlib.suppress(Exception):
+                await ack.wait_for_playout()
 
-        # Switch straight into the cloned voice — the demo no longer asks "wanna
-        # hear it?". The very next LLM reply IS the reveal, spoken in their clone.
-        # update_options applies to the *next* synthesis, so the ack queued above
-        # (before this swap) still played back in the original voice.
         tts = session.tts
         if isinstance(tts, fishaudio.TTS):
-            tts.update_options(voice_id=self._cloned_voice_id)
-            logger.info("switched TTS to cloned voice id=%s", self._cloned_voice_id)
+            tts.update_options(voice_id=model_id)
+            logger.info("switched TTS to cloned voice id=%s", model_id)
             await self._set_clone_state("playing")
         else:
             logger.warning("session TTS is not Fish Audio; cannot switch to clone")
 
+        self._cloned = True
+        await self.update_instructions(
+            build_instructions(self._mode, self._mood, cloned=True)
+        )
+        # Stop suppressing replies and reveal the clone — first line is in their voice.
+        self._reading_script = False
+        self._safe_generate_reply(session, CLONE_REVEAL_GREETING)
+
+    @function_tool
+    async def set_style(
+        self,
+        context: RunContext,
+        mode: Literal["professional", "casual"] | None = None,
+        mood: str | None = None,
+        color: Literal["gray", "amber", "green", "blue", "violet"] | None = None,
+    ) -> str:
+        """Change how you speak, on the user's request, and update the on-screen mood indicator.
+
+        Call this whenever the user asks you to switch register or take on a mood or emotion.
+        Showing off this expressive range is the main point of the demo.
+
+        Args:
+            mode: "professional" (composed, customer-service register) or "casual" (relaxed,
+                playful, disfluent). Omit to keep the current register.
+            mood: a short word for the emotion to perform in (e.g. "excited", "sleepy",
+                "calm", "playful"). Pass an empty string to clear the mood and go neutral.
+            color: the mood-ring color that best matches the mood, for the on-screen
+                indicator — gray = stressed/tense/anxious; amber = nervous/unsettled/unsure;
+                green = calm/relaxed/balanced; blue = happy/active/at ease; violet =
+                passionate/excited/playful. Pick the closest. Omit when only changing mode.
+
+        After this returns, give one short line in the new style so the user can hear the change.
+        """
+        if mode is not None:
+            self._mode = mode
+        if mood is not None:
+            self._mood = mood.strip() or None
+        await self.update_instructions(
+            build_instructions(self._mode, self._mood, cloned=self._cloned)
+        )
+
+        # Fall back to the mode's resting color when the mood (and thus an explicit
+        # color) was cleared, so the indicator never goes stale.
+        if self._mood is None:
+            color = DEFAULT_MODE_COLOR[self._mode]
+        elif color is None:
+            color = "green"
+        await self._set_style_attrs(mode=self._mode, mood=self._mood or "", color=color)
+        logger.info(
+            "style updated: mode=%s mood=%s color=%s", self._mode, self._mood, color
+        )
+
+        descriptor = f"{self._mode} mode"
+        if self._mood:
+            descriptor += f" with a {self._mood} mood"
         return (
-            "The clone is ready and you are ALREADY speaking in their cloned voice now — do NOT "
-            "ask whether they want to hear it. In one short, upbeat sentence from YOUR perspective "
-            "as the assistant, tell them their cloned voice is ready and ask what they think "
-            "(e.g. 'okay — your cloned voice is ready, what do you think?'). Do NOT pretend to be "
-            "the user discovering their own voice, and don't say things like 'it sounds just like "
-            "me'. After this one line, go back to single-sentence replies."
+            f"You're now in {descriptor}. Give ONE short line right now in this new style so "
+            "the user can hear the difference, then carry on the conversation."
+        )
+
+    def tts_node(self, text, model_settings):
+        # Fix the "LiveKit" pronunciation in the audio only (transcript is unaffected).
+        return Agent.default.tts_node(
+            self, _fix_tts_pronunciation(text, LIVEKIT_PHONEME), model_settings
         )
 
 
@@ -410,17 +602,40 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
-@server.rtc_session()
+@server.rtc_session(agent_name=AGENT_NAME)
 async def my_agent(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
 
+    # Per-session config from the frontend, delivered as agent dispatch metadata:
+    #   preset voice -> {"voice": "<voice_id>"};  clone-first -> {"clone": true}
+    raw_meta = ctx.job.metadata or ""
+    try:
+        meta = json.loads(raw_meta) if raw_meta else {}
+        if not isinstance(meta, dict):
+            meta = {}
+    except Exception:
+        logger.warning("could not parse job metadata: %r", raw_meta)
+        meta = {}
+
+    want_clone = meta.get("clone") is True
+    requested_voice = meta.get("voice")
+    start_voice = (
+        requested_voice if requested_voice in PRESET_VOICES else DEFAULT_VOICE_ID
+    )
+    logger.info(
+        "session config: clone=%s start_voice=%s (requested=%s)",
+        want_clone,
+        start_voice,
+        requested_voice,
+    )
+
     session = AgentSession(
         stt=assemblyai.STT(),
         tts=fishaudio.TTS(
             model="s2.1-pro",
-            voice_id="10b2254869cf4340bdb801928e2fc88e",
+            voice_id=start_voice,
             latency_mode="low",
             # PCM, not the default WAV. With streamed LLM output, the WAV-container
             # decode path produces an audible first-word "crackle" over WebRTC that
@@ -433,13 +648,10 @@ async def my_agent(ctx: JobContext):
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],
-        # preemptive_generation is intentionally OFF. It starts generating the
-        # reply while the user is still talking — i.e. before
-        # on_user_turn_completed runs — so the capture-status note and (crucially)
-        # the "you're ready, pivot to cloning now" system message we inject there
-        # don't make it into that turn's response. The agent then misses the
-        # moment the buffer crosses threshold and the clone pitch stalls until the
-        # user prods it. Correctness of the injected pivot beats the latency win.
+        # preemptive_generation is intentionally OFF. It starts generating the reply
+        # while the user is still talking — before on_user_turn_completed runs — so the
+        # StopResponse we raise there to stay silent during the clone-script read would
+        # land too late to suppress the reply. Keep it off so the gate is reliable.
     )
 
     assistant = Assistant()
@@ -447,18 +659,6 @@ async def my_agent(ctx: JobContext):
 
     async def _cleanup_cloned_voice(_reason: str) -> None:
         model_id = assistant._cloned_voice_id
-        # Also cover a clone that was prefetched but never used — e.g. the buffer
-        # crossed threshold and we uploaded, but the user then declined — so it
-        # doesn't linger on Fish.
-        task = assistant._clone_prefetch_task
-        if (
-            model_id is None
-            and task is not None
-            and task.done()
-            and not task.cancelled()
-            and task.exception() is None
-        ):
-            model_id = task.result()
         if model_id is None:
             return
         api_key = os.environ.get("FISH_API_KEY")
@@ -468,26 +668,32 @@ async def my_agent(ctx: JobContext):
 
     ctx.add_shutdown_callback(_cleanup_cloned_voice)
 
-    # Start the session, which initializes the voice pipeline and warms up the models
+    # Start the session, which initializes the voice pipeline and warms up the models.
     await session.start(
         agent=assistant,
         room=ctx.room,
     )
 
-    # Tee the mic so we silently buffer user audio for a later voice clone.
-    assistant.install_capture(session)
+    # Track the live agent state so our attribute writes never drop `lk.agent.state`
+    # (session.start has already moved it to "listening").
+    assistant._agent_state = session.agent_state
+    session.on("agent_state_changed", assistant._on_agent_state_changed)
 
-    # Open the conversation — agent greets and puts voice cloning on the table.
-    # The actual clone is triggered later, once enough of the user's voice is buffered.
-    session.generate_reply(
-        instructions=(
-            "Greet the user casually in one short sentence and ask if they've "
-            "ever tried voice cloning before."
-        ),
+    # Seed the mood-ring indicator with the resting professional-mode state (both paths).
+    await assistant._set_style_attrs(
+        mode=assistant._mode,
+        mood="",
+        color=DEFAULT_MODE_COLOR[assistant._mode],
     )
 
-    # Join the room and connect to the user
-    await ctx.connect()
+    if want_clone:
+        # Clone-first: read the script, clone, switch voice, then converse. Connects
+        # to the room itself (the mic must be live while the user reads).
+        await assistant.run_clone_first(session, ctx)
+    else:
+        # Preset voice: open straight into the expressive conversation.
+        session.generate_reply(instructions=PRESET_GREETING)
+        await ctx.connect()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,11 @@
-# Voice cloning demo
+# Expressive voice agent demo
 
-A small voice agent that lets you clone your own voice in ~10 seconds of
-conversation, powered by [Fish Audio](https://fish.audio),
-[AssemblyAI](https://www.assemblyai.com), [OpenAI](https://openai.com), and
+A small voice agent that shows off [Fish Audio](https://fish.audio)'s
+**expressive** text-to-speech. Pick one of four preset voices (or clone your own
+by reading a short script), then ask the agent to switch register
+(professional ↔ casual) or take on a mood, and hear the emotional range. Powered
+by [Fish Audio](https://fish.audio), [AssemblyAI](https://www.assemblyai.com),
+[OpenAI](https://openai.com), and
 [LiveKit Agents](https://docs.livekit.io/agents/).
 
 ```
@@ -73,13 +76,20 @@ that provisions both services from a single click — no Docker needed.
 
 ## How it works
 
-- The agent invites you to talk for ~10 seconds and buffers your mic audio in
-  the background while you chat. It tracks cumulative user speech (per VAD) and
-  clones once it has enough.
-- The buffered audio is VAD-trimmed, transcribed via AssemblyAI, and uploaded to
-  Fish Audio's `/model` endpoint (`train_mode=fast`).
-- The cloned voice is swapped into the active TTS and revealed right away — the
-  agent's next line speaks in your voice — then deleted from Fish on session end.
+- **Pick a voice up front.** The landing page offers four preset Fish Audio
+  voices (with audio previews) or "clone your voice." That choice rides agent
+  metadata to the worker via named dispatch, so the agent starts in the chosen
+  voice.
+- **Expressive by default.** The agent opens in a professional register; ask it
+  to get casual or take on a mood and it calls a `set_style` tool that rewrites
+  its own prompt at runtime and updates an on-screen mood-ring indicator.
+  Delivery is shaped with Fish Audio's bracket markers (`[excited]`, `[calm]`,
+  `[chuckles]`, …), which are stripped from the transcript.
+- **Clone-first (optional).** If you choose "clone your voice," the agent shows a
+  short script and captures ~12 seconds as you read it (highlighting words live
+  from streaming STT), clones your voice via Fish Audio's `/model` endpoint
+  (`train_mode=fast`), switches the TTS into it, and greets you in your own voice.
+  The clone and the recording are deleted from Fish when the call ends.
 
 See `fish/CLAUDE.md` for the full agent-side flow and `fish/src/agent.py` for
 the code.

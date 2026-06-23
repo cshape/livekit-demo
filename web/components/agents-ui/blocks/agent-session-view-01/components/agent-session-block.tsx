@@ -9,7 +9,8 @@ import {
   type AgentControlBarControls,
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
-import { CaptureProgress } from '@/components/app/capture-progress';
+import { CloneScriptCard } from '@/components/app/clone-script-card';
+import { MoodIndicator } from '@/components/app/mood-indicator';
 import { cn } from '@/lib/shadcn/utils';
 
 const MotionMessage = motion.create(Shimmer);
@@ -177,6 +178,12 @@ export function AgentSessionView_01({
       {...props}
     >
       <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
+
+      {/* Clone-script prompt — centered overlay shown only during clone-first read */}
+      <div className="pointer-events-none absolute inset-x-4 top-1/2 z-30 -translate-y-1/2">
+        <CloneScriptCard />
+      </div>
+
       {/* transcript */}
 
       <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
@@ -189,7 +196,7 @@ export function AgentSessionView_01({
               <AgentChatTranscript
                 agentState={agentState}
                 messages={messages}
-                className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 md:[&>div>div]:px-6"
+                className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 [&>div>div]:pb-28 md:[&>div>div]:px-6"
               />
             </motion.div>
           )}
@@ -218,7 +225,7 @@ export function AgentSessionView_01({
         )}
         <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
           <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
-          <CaptureProgress className="mb-2" />
+          <MoodIndicator className="mb-2" />
           <AgentControlBar
             variant="livekit"
             controls={controls}

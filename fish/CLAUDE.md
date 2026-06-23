@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-LiveKit Agents (Python) voice-cloning demo. Single agent at `src/agent.py`, voice-clone helpers at `src/voice_clone.py`. React frontend in sibling dir at `../web/` (Next.js 15 + Tailwind v4 + shadcn + `@livekit/components-react`, bootstrapped from the `agent-starter-react` template).
+LiveKit Agents (Python) **expressive-voice** demo (Fish Audio TTS). Single agent at `src/agent.py`, voice-clone helpers at `src/voice_clone.py`. React frontend in sibling dir at `../web/` (Next.js 15 + Tailwind v4 + shadcn + `@livekit/components-react`, bootstrapped from the `agent-starter-react` template).
+
+**Landing page picks the voice up front.** The user either chooses one of 4 preset Fish voices or "clone your voice" (reads a short script, then the call begins in their clone). That choice rides **agent metadata** to the worker via NAMED dispatch. On top of any voice, the agent can switch register (professional/casual) and mood at runtime via the `set_style` tool (drives the mood-ring indicator).
 
 This is a LiveKit Agents (Python) project: use `uv` for everything, app code lives under `src/` with `agent.py` as the entrypoint, and `uv run ruff check src/` / `uv run ruff format src/` must stay green. For up-to-date LiveKit docs, use the `lk docs` CLI or the LiveKit docs MCP server.
 
@@ -27,7 +29,7 @@ Fish reads `FISH_API_KEY`, not `FISH_AUDIO_API_KEY`.
 
 ## Common commands
 
-All from `/Users/cale/code/fish/livekit-demo/fish/` (the dir with `pyproject.toml`).
+All from `/Users/cale/code/livekit-demo/fish/` (the dir with `pyproject.toml`).
 
 ```bash
 # First time / after pulling deps
@@ -67,53 +69,88 @@ pnpm install   # first run only
 pnpm dev
 ```
 
-Open http://localhost:3000, hit "Start call". The worker auto-dispatches into the new room (no `agent_name` set on the rtc_session). `web/.env.local` is preconfigured to point at the local dev server.
+Open http://localhost:3000, hit "Start call". The frontend uses **named dispatch** — it requests the agent `fish-demo` (see "Voice selection" below), so the worker must be registered under that name (it is, via `@server.rtc_session(agent_name="fish-demo")`). `web/.env.local` is preconfigured to point at the local dev server.
+
+## Expressiveness & style switching (the demo's hero)
+
+The demo leads with **expressive TTS**, not cloning. The agent opens by introducing itself as a Fish Audio-powered expressive voice in **professional** mode and invites the user to change its register or mood; cloning is a secondary, opt-in offer.
+
+- **Prompt composition** (`agent.py`): instructions are assembled by `build_instructions(mode, mood, cloned)` from `CORE_INSTRUCTIONS` (the expressiveness engine — bracket markers, pronunciation, Fish background) + a swappable `MODE_BLOCKS[mode]` (`professional` = composed customer-service register, low disfluency; `casual` = relaxed/playful/disfluent) + an optional transient `_mood_block(mood)` overlay + (only after a successful clone) a slim `CLONED_VOICE_NOTE`. `Assistant` tracks `self._mode` (default `"professional"`), `self._mood` (default `None`), and `self._cloned`.
+- **`set_style` tool**: `set_style(mode?, mood?, color?)` — the LLM calls this when the user asks to switch register or take on a mood. It updates `_mode`/`_mood`, rebuilds instructions via `await self.update_instructions(...)`, writes `style.*` participant attributes, and returns a directive to demo the new style. `mode`/`color` are `Literal` enums (real JSON-schema enums); `mood` is free text (empty string clears it).
+- **Reconcile the prompts with Tina's branch**: the `professional`/`casual` blocks here are drafts. Tina maintains `casual`/`customer_service` expressive prompts (her livekit/agents branch + what she pushed to `cale/expressive-fish`) — fold those in when integrating with the SDK's real expressiveness setting.
+
+The `professional`-vs-`casual` split maps to the two prompt families that the upstream expressiveness setting will ship; this demo hard-codes the prompt text until that setting lands in the Agents SDK.
+
+## Frontend: `style.*` mood-ring indicator
+
+`set_style` writes three participant attributes that drive `web/components/app/mood-indicator.tsx` (a small pill in the bottom cluster, above the control bar):
+- `style.mode` — `professional` | `casual` (label text).
+- `style.mood` — free-text mood word, or `""` when neutral.
+- `style.color` — one of `gray`/`amber`/`green`/`blue`/`violet`, a **mood-ring** color the LLM picks to match the mood (gray = tense, amber = unsettled, green = calm, blue = happy/at-ease, violet = passionate/excited). The component maps it to a glowing dot. Seeded to the mode's resting color (`DEFAULT_MODE_COLOR`) on session start and when the mood is cleared.
+
+## Voice selection: landing page → agent (NAMED dispatch + agent metadata)
+
+The chosen voice (or clone flag) is picked on the landing page and travels to the worker as **agent dispatch metadata**:
+- Frontend `web/components/app/app.tsx` holds the selection (`useState`, default = first preset). It passes `{ agentName: 'fish-demo', agentMetadata: JSON.stringify(...) }` to `useSession` — `agentMetadata` is `{"voice":"<id>"}` for a preset or `{"clone":true}` for clone-first.
+- LiveKit's `TokenSourceEndpoint` maps `agentMetadata` → `room_config.agents[0].metadata` in the POST body to `/api/token`; the route forwards `room_config` into the token unchanged. (No token-route change was needed.)
+- The worker reads it as **`ctx.job.metadata`** (a JSON string) at the top of `my_agent`, validates the voice against `PRESET_VOICES` (falls back to `DEFAULT_VOICE_ID` = Stellan), and either greets normally (preset) or runs the clone-first flow.
+
+**This requires NAMED dispatch.** `@server.rtc_session(agent_name="fish-demo")` (constant `AGENT_NAME`) must match `APP_CONFIG_DEFAULTS.agentName` in `web/app-config.ts` (hardcoded `'fish-demo'`). A mismatch = NO agent dispatches, silently (the frontend just times out via `useAgentErrors`). The 4 preset `voice_id`s live in `PRESET_VOICES` in **both** `src/agent.py` and `web/app-config.ts` — keep them in sync. Preview clips at `web/public/voice-samples/<id>.mp3` are generated by `scripts/gen_voice_samples.py`.
 
 ## Frontend: `clone.state` state machine
 
-The Python agent calls `self._set_clone_state("<state>")` at each transition, which writes `clone.state` onto its participant attributes (read-modify-write — see the `set_attributes` gotcha below). Values:
-- `cloning` — set on entry to `clone_my_voice`, once the upload pipeline starts.
-- `ready` — set when Fish returns the model_id.
-- `playing` — set at the end of `clone_my_voice`, right after it swaps the TTS to the clone.
+Only **clone-first** sessions (`{"clone":true}`) touch this; preset sessions never set it. The agent calls `self._set_clone_state("<state>")` at each transition (read-modify-write — see the `set_attributes` gotcha below). Values: `idle → prompt → cloning → ready → playing`:
+- `prompt` — set on entry to `run_clone_first`; the user is reading the on-screen script. Also publishes `clone.script` (the script text), `clone.heard` (live STT of the read, throttled ~3 Hz, from the `user_input_transcribed` event), and `clone.capture_secs`.
+- `cloning` — upload started.
+- `ready` — Fish returned the model_id.
+- `playing` — TTS swapped to the clone; reveal greeting about to play.
 
-No `recording` state — the demo no longer prompts the user for a monologue, so there's no countdown phase to show. React reads the attribute via `useParticipantAttribute('clone.state', { participant: agent })`. The status pill that used to surface these states was removed; `clone.state` now drives `web/components/app/capture-progress.tsx` (hides the capture bar once state leaves `idle`), the "preparing a response" dots in `web/components/agents-ui/agent-chat-transcript.tsx` (shown while state is `cloning` so there's no static screen during the upload), and the `/debug` overlay's clone-state log.
+React reads it via `useParticipantAttribute('clone.state', ...)`. It drives `web/components/app/clone-script-card.tsx` — the centered card that, while `state === 'prompt'`, shows the "read this aloud" script and **highlights words as they're read**: it fuzzy-matches `clone.heard` against the script (greedy align with a forward window to skip STT drops + a small backward window to recover, plus bounded edit distance) and uses an elapsed-time floor so the highlight keeps progressing if STT lags. No seconds counter is shown. Once `state === 'cloning'` the same card swaps the script for the loading dot (`AgentChatIndicator`, the indicator used elsewhere for "thinking").
+
+**The read is kept out of the chat.** `agent-chat-transcript.tsx` (`FilteredMessages`) hides any message seen while `clone.state` is `prompt`/`cloning` (the user reading + the agent's read prompt/ack), via a persistent id set — so the script read never lands in the transcript, but the post-clone reveal + conversation do. (There's no clean backend toggle: `session.output.set_transcription_enabled` gates only the agent's transcript, not the user-transcript forwarding path.)
 
 Don't reuse the built-in `lk.agent.state` attribute (`listening`/`thinking`/`speaking`) for cloning UI — it flickers during `session.say` and tool execution and isn't a clean source of truth.
 
-## Voice-cloning flow
+## Clone-first flow (upfront, controller-driven)
 
-The agent silently buffers user audio in the background during normal conversation and only pivots to the clone pitch once it has enough speech to work with. The upload (trim → STT → Fish `/model`) is **prefetched** the instant the buffer crosses threshold — `_run_clone_upload` is fired as a background task from `install_capture` so it's usually done by the time `clone_my_voice` runs; the tool just `await`s that task (falling back to running it inline). The prefetch does **network/CPU only and never speaks** — a prior attempt that drove the *announcement* from a background task raced with the LLM tool-response queue and got silently dropped, so all speech stays inside the tool.
+Cloning is **upfront-only** — there is no opportunistic mid-conversation clone anymore (no `clone_my_voice` tool). `Assistant.run_clone_first(session, ctx)` runs the whole thing as a straight-line coroutine, reusing the capture/upload machinery:
 
-1. Session starts, agent greets warmly with no mention of cloning. `Assistant.install_capture(session)` (called from `my_agent` after `session.start`) tees `session.input.audio` through a `PassthroughCaptureAudioInput` that forwards every frame unchanged *and* appends it to an in-memory buffer when `tee.recording` is True. The tee is hard-capped at `CAPTURE_MAX_SECS` (60s) of buffered audio — long recordings get truncated rather than ballooning memory.
-2. `install_capture` also subscribes to `session.on("user_state_changed", ...)` and flips `tee.recording` based on whether the user is currently speaking. It tracks cumulative speech wall-clock between `speaking` → `listening`/`away` transitions; once it crosses `CLONE_PITCH_THRESHOLD_SECS` (10s — Fish Audio's voice cloning works on ~10s of reference audio), `_capture_ready` flips to True **and the upload is prefetched** (`self._clone_prefetch_task = asyncio.create_task(self._run_clone_upload(...))`) so the network work overlaps the rest of the conversation instead of starting cold inside the tool.
-3. `Assistant.on_user_turn_completed(turn_ctx, new_message)` checks `_capture_ready and not _pitch_done` on every completed user turn. The first time it's True, it appends a hidden system message to `turn_ctx` telling the LLM to organically pivot to the clone pitch in its next response, and sets `_pitch_done = True`. The pitch rides the normal next-response cycle so it can't interrupt the user mid-turn.
-4. On confirmation, LLM calls `Assistant.clone_my_voice` with **zero preamble** — the tool plays its own cues. The tool sets `clone.state = "cloning"`, fires a verbatim `session.say(random.choice(CLONE_ACK_LINES), add_to_chat_ctx=True, allow_interruptions=False)` (one of 5 two-sentence acks that promise the next line will be in the cloned voice; added to chat ctx so the reveal flows from it, uninterruptible so it plays in full), then `await`s the prefetched upload task (or runs `_run_clone_upload` inline if there's no prefetch / it failed). The upload itself is silero VAD-trim → fresh `assemblyai.STT` one-shot transcription → POST `/model` to Fish (multipart, `train_mode=fast`, `visibility=private`, with `texts=<transcript>`), and it overlaps the ack playback either way. Verbatim `session.say` instead of `generate_reply` because `generate_reply` from inside a tool auto-sets `tool_choice="none"`; `session.say` sidesteps that.
-5. Tool awaits the ack's `SpeechHandle.wait_for_playout()`, then **itself** swaps the TTS to the clone (`fishaudio.TTS.update_options(voice_id=...)`), sets `clone.state = "playing"`, and returns a directive telling the LLM to announce the clone is ready and ask what they think. There is no "wanna hear it?" confirmation step — the reveal is automatic, so the next LLM reply is already in the cloned voice. (`update_options` applies to the *next* synthesis, so the ack queued before the swap still plays in the original voice.)
-6. On session end, `ctx.add_shutdown_callback` `DELETE`s the Fish model.
+1. `install_capture(session)` tees `session.input.audio` through `PassthroughCaptureAudioInput` (forwards every frame, buffers when `tee.recording`, hard-capped at `CAPTURE_MAX_SECS=60`). `_reading_script = True`.
+2. Publish `clone.script` + `clone.state="prompt"`, `await ctx.connect()` (so the mic is live), then `session.say(CLONE_PROMPT_LINE)` in the starting preset voice asking the user to read the on-screen script.
+3. `user_state_changed` accumulates `_cumulative_speech_secs`; when it crosses `CLONE_SCRIPT_TARGET_SECS` (12s) it sets the `_capture_target_reached` asyncio.Event. The controller `await asyncio.wait_for(... , CLONE_SCRIPT_TIMEOUT_SECS=25)`.
+4. **Reply suppression:** while `_reading_script`, `on_user_turn_completed` raises `StopResponse` (and `on_user_turn_exceeded` no-ops) so the agent stays silent and never talks over the read. (This is why `preemptive_generation` must stay OFF — it would start the reply before `on_user_turn_completed` runs.)
+5. Under-read fallback: if `< CLONE_MIN_SECS` (6s) buffered (or no frames), reset to `idle`, clear `_reading_script`, and greet in the preset voice (`CLONE_FALLBACK_GREETING`).
+6. Otherwise `clone.state="cloning"`, fire `_run_clone_upload(frames, vad)` as a task (silero VAD-trim → POST `/model` to Fish, `train_mode=fast`, **no reference transcript**), and `session.say` a one-line ack in the preset voice to fill the window. `await` the upload (fall back to `idle` + preset greeting on failure). We deliberately skip computing a reference transcript: AssemblyAI's streaming STT runs at ~1× realtime, so transcribing ~15s of read added ~15–20s and dominated the clone time (pushing the whole flow past the frontend agent-connect timeout). Fish clones fine from audio alone, and skipping it is more mis-read-robust (no text/audio mismatch). The clone trigger is purely time-of-speech (`CLONE_SCRIPT_TARGET_SECS=12`, min `6`), never script-match, so a mis-read still clones.
+7. On model_id: store it, `clone.state="ready"`, await the ack's `wait_for_playout()`, `fishaudio.TTS.update_options(voice_id=model_id)`, `clone.state="playing"`. Set `_cloned=True`, `update_instructions(build_instructions(..., cloned=True))` (adds the slim "you're in their cloned voice; fish dot audio for permanent" note), clear `_reading_script`, and `generate_reply(CLONE_REVEAL_GREETING)` — the first line is already in the cloned voice.
+8. On session end, `ctx.add_shutdown_callback` `DELETE`s the Fish model.
+
+Preset sessions skip all of this: `my_agent` just seeds the mood-ring and `generate_reply(PRESET_GREETING)` then `ctx.connect()`.
 
 ## Things that will bite you
 
 - **Console mode mocks `ctx.room`.** Anything that touches `rtc.AudioStream.from_participant` or `participant._ffi_handle` will crash with `AttributeError: Mock object has no attribute '_ffi_handle'`. For audio capture, go through `session.input.audio` — uniform across console + rtc.
-- **The STT plugin is streaming-only** (`assemblyai.STT` is a realtime websocket model; no batch `recognize()`). The reference-transcript path therefore feeds the buffered frames through a one-shot `transcribe_frames(stt, frames)` over `stream()`, collecting `FINAL_TRANSCRIPT` events. `transcribe_frames` is provider-agnostic, so swapping STT vendors only touches the two `assemblyai.STT()` call sites in `agent.py`.
-- **Always use a fresh `assemblyai.STT()` for the reference transcription**, not `session.stt`. An error on the session's STT instance is treated as fatal, so the throwaway instance isolates the clone path.
+- **The STT plugin is streaming-only** (`assemblyai.STT` is a realtime websocket model; no batch `recognize()`). The session STT drives turn detection AND the live clone-read highlighting (`user_input_transcribed` → `clone.heard`). The clone upload no longer computes a reference transcript (it dominated latency — see the clone-first flow), so `voice_clone.transcribe_frames` exists but is currently unused.
 - **Silero `END_OF_SPEECH` requires trailing silence** (~`min_silence_duration`). `vad_trim_frames` pads with ~1s of silence so the event fires even when the user is still mid-word at the buffered-frames cutoff.
 - **`fishaudio.TTS.update_options(voice_id=...)` applies to the *next* synthesis**, not mid-utterance. `ChunkedStream`/`SynthesizeStream` copy `_opts` on construction.
-- **`preemptive_generation=True` races with `on_user_turn_completed`.** It starts generating the reply while the user is still speaking, before `on_user_turn_completed` runs — so the capture-status note and the one-shot "pivot to cloning now" system message injected there don't land in that turn's response (LiveKit logs `preemptive generation enabled but chat context or tools have changed after on_user_turn_completed`). The agent misses the moment the buffer crosses threshold and the clone pitch stalls until the user prods it. Keep it **off** as long as the pivot relies on `on_user_turn_completed` injection.
-- **`livekit.rtc.LocalParticipant.set_attributes` clobbers all attributes you don't pass.** The implementation (rtc/participant.py:552-571) builds the outgoing set from a fresh empty `FfiRequest` instead of reading the current attributes, so calling it with a single key wipes everything else — including `lk.agent.state`, which the React `useAgent` hook reads to determine connection state. With it missing, `agent.state` flips to `"failed"` and the template's `useAgentErrors` ends the session. Always read `participant.attributes`, merge your keys, then send. `Assistant._set_clone_state` does this.
+- **The clone-first read holds the agent in a long pre-greeting phase — the frontend's agent-connect timeout must cover it.** `useSession`'s default `agentConnectTimeoutMilliseconds` is **20s**; it's a one-shot check that flips the agent to `state==="failed"` (→ `useAgentErrors` ends the session) if `lk.agent.state` isn't `listening`/`thinking`/`speaking` at that instant. In a clone session the agent only `generate_reply`s *after* the read + clone build, and the high-frequency `clone.heard` attribute writes during the read lag/contend with the SDK's own `lk.agent.state` updates — so at 20s the frontend may not have registered "listening" yet. We pass `agentConnectTimeoutMilliseconds: 90_000` in `web/components/app/app.tsx` so the check lands well after the read+clone settles (the clone itself is now fast — no reference transcript). Any `generate_reply`/`say` in `run_clone_first` must also tolerate a closed session (the user can disconnect mid-read) — use `_safe_generate_reply`, which swallows the `RuntimeError("AgentSession isn't running")` instead of crashing the job.
+- **`preemptive_generation=True` races with `on_user_turn_completed`.** It starts generating the reply while the user is still speaking, before `on_user_turn_completed` runs — so the `StopResponse` we raise there to keep the agent silent during the clone-script read would land too late to suppress the reply, and the agent talks over the reading. Keep it **off** as long as reply suppression relies on `on_user_turn_completed`.
+- **`livekit.rtc.LocalParticipant.set_attributes` clobbers all attributes you don't pass.** The implementation (rtc/participant.py:552-571) builds the outgoing set from a fresh empty `FfiRequest` instead of reading the current attributes, so calling it with a single key wipes everything else — including `lk.agent.state`, which the React `useAgent` hook reads to determine connection state. With it missing, `agent.state` flips to `"failed"` and the template's `useAgentErrors` ends the session. `Assistant._push_attrs` writes **non-destructively**: it reads `participant.attributes`, then re-asserts (a) every attr we've ever set (`self._own_attrs`) and (b) the live `lk.agent.state` (cached from `agent_state_changed`, wired in `my_agent`). This matters because the SDK *also* writes `lk.agent.state` via the same clobber-prone call — the high-frequency `clone.heard` writes during the read would otherwise race it and drop the state. Never call `set_attributes` directly; go through `_set_clone_attrs`/`_set_style_attrs`.
 
 ## Editing conventions
 
-- One `Agent` subclass (`Assistant`), tools as `@function_tool`-decorated methods. No agent handoffs / `AgentTask` unless the flow grows.
-- The clone upload is prefetched in a background task, but all **speaking** stays inside `clone_my_voice` — never drive an announcement from a background task (it races the LLM tool-response queue and gets dropped). Background work is fine as long as it's network/CPU only.
-- For any "the agent should speak something not from the LLM" use `session.say(text, add_to_chat_ctx=...)`. Set `add_to_chat_ctx=False` for system-only cues so the LLM's chat context stays clean.
-- Don't call `session.generate_reply(...)` from inside a `@function_tool` — it auto-sets `tool_choice="none"`, suppressing further tool calls. Use `session.say` instead.
-- To shape the LLM's next response from outside a tool (e.g. pivoting the conversation), override `Agent.on_user_turn_completed(turn_ctx, new_message)` and `turn_ctx.add_message(role="system", content=...)`. It rides the natural next-response cycle and won't interrupt the user mid-turn.
+- One `Agent` subclass (`Assistant`); `set_style` is the only `@function_tool`. The clone flow is driven imperatively from `run_clone_first` (a coroutine), not by an LLM tool. No agent handoffs / `AgentTask` unless the flow grows.
+- For any "the agent should speak something not from the LLM" use `session.say(text, add_to_chat_ctx=...)`. The clone-first prompt/ack use `add_to_chat_ctx=False` (system-only cues) so the LLM's chat context stays clean.
+- To keep the agent silent for a stretch of user turns (e.g. while they read the clone script), set a flag and raise `StopResponse` from `on_user_turn_completed` (and no-op `on_user_turn_exceeded`). The activity catches `StopResponse` and skips that turn's reply while still flushing the STT transcript.
+- `build_instructions(mode, mood, cloned)` is the single source of the system prompt; rebuild + `update_instructions(...)` whenever mode/mood/cloned changes (`set_style` and the post-clone swap both do this).
+- **Fixing TTS pronunciation without changing the transcript**: override `Agent.tts_node` (audio) — NOT `transcription_node` (the on-screen text). `Assistant.tts_node` streams the text through `_fix_tts_pronunciation`, which rewrites `LiveKit` → `LIVEKIT_PHONEME` (`<|phoneme_start|>L AY1 V<|phoneme_end|> Kit`) so Fish stops saying "liv-kit". Direct-API testing nailed down the format: phoneme control **does** work on s2.1-pro (an `<|phoneme_start|>EH1 N JH AH0 N IH1 R<|phoneme_end|>` reliably says "engineer"), but the full-word phoneme `L AY1 V K IH0 T` broke it — a phoneme on just "Live" plus a plain "Kit" is what lands. The streaming rewrite holds back only a trailing prefix-of-"livekit" so the word is never split across chunk boundaries. Note: cloned voices honor this less reliably than base voices, but a single approach is used for simplicity.
 
 ## Project layout
 
 ```
 src/
-├── agent.py         # Assistant, tools, server entrypoint
-└── voice_clone.py   # capture-mute tee, VAD trim, STT transcribe, Fish HTTP
+├── agent.py         # Assistant, set_style tool, clone-first flow, server entrypoint
+└── voice_clone.py   # capture tee, VAD trim, STT transcribe, Fish HTTP (model create/delete)
+scripts/
+└── gen_voice_samples.py  # one-off: synth the 4 preset preview clips → web/public/voice-samples/
 tests/               # test_agent.py — 3 LLM-judge eval tests (friendliness, grounding, refusal)
 ```

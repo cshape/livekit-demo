@@ -1,6 +1,6 @@
 'use client';
 
-import { type ComponentProps } from 'react';
+import { type ComponentProps, useRef } from 'react';
 import type { RemoteParticipant } from 'livekit-client';
 import { AnimatePresence } from 'motion/react';
 import {
@@ -106,6 +106,64 @@ export interface AgentChatTranscriptProps extends ComponentProps<'div'> {
  * />
  * ```
  */
+function MessageRow({ receivedMessage }: { receivedMessage: ReceivedMessage }) {
+  const { timestamp, from, message } = receivedMessage;
+  const locale = navigator?.language ?? 'en-US';
+  const messageOrigin = from?.isLocal ? 'user' : 'assistant';
+  const time = new Date(timestamp);
+  const title = time.toLocaleTimeString(locale, { timeStyle: 'full' });
+
+  return (
+    <Message title={title} from={messageOrigin}>
+      <MessageContent>
+        <MessageResponse className="[&_a]:font-medium [&_a]:text-sky-500 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-sky-400">
+          {linkifyFishAudio(hideStreamingFishPartial(stripEmotionTags(message)))}
+        </MessageResponse>
+      </MessageContent>
+    </Message>
+  );
+}
+
+// Messages spoken/heard during the clone-script read shouldn't land in the chat
+// (the user reading the script, the agent's read prompt/ack). We hide any message
+// seen while clone.state is 'prompt' or 'cloning'; the set persists so they stay
+// hidden once the real conversation begins.
+function FilteredMessages({
+  agent,
+  messages,
+}: {
+  agent: RemoteParticipant;
+  messages: ReceivedMessage[];
+}) {
+  const cloneState = useParticipantAttribute('clone.state', { participant: agent });
+  const hiddenRef = useRef<Set<string>>(new Set());
+  if (cloneState === 'prompt' || cloneState === 'cloning') {
+    for (const m of messages) hiddenRef.current.add(m.id);
+  }
+  const visible = messages.filter((m) => !hiddenRef.current.has(m.id));
+  return (
+    <>
+      {visible.map((m) => (
+        <MessageRow key={m.id} receivedMessage={m} />
+      ))}
+    </>
+  );
+}
+
+function TranscriptMessages({ messages }: { messages: ReceivedMessage[] }) {
+  const { agent } = useVoiceAssistant();
+  if (!agent) {
+    return (
+      <>
+        {messages.map((m) => (
+          <MessageRow key={m.id} receivedMessage={m} />
+        ))}
+      </>
+    );
+  }
+  return <FilteredMessages agent={agent} messages={messages} />;
+}
+
 export function AgentChatTranscript({
   agentState,
   messages = [],
@@ -115,23 +173,7 @@ export function AgentChatTranscript({
   return (
     <Conversation className={className} {...props}>
       <ConversationContent>
-        {messages.map((receivedMessage) => {
-          const { id, timestamp, from, message } = receivedMessage;
-          const locale = navigator?.language ?? 'en-US';
-          const messageOrigin = from?.isLocal ? 'user' : 'assistant';
-          const time = new Date(timestamp);
-          const title = time.toLocaleTimeString(locale, { timeStyle: 'full' });
-
-          return (
-            <Message key={id} title={title} from={messageOrigin}>
-              <MessageContent>
-                <MessageResponse className="[&_a]:font-medium [&_a]:text-sky-500 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-sky-400">
-                  {linkifyFishAudio(hideStreamingFishPartial(stripEmotionTags(message)))}
-                </MessageResponse>
-              </MessageContent>
-            </Message>
-          );
-        })}
+        <TranscriptMessages messages={messages} />
         <ThinkingIndicator agentState={agentState} />
       </ConversationContent>
       <ConversationScrollButton />
@@ -139,30 +181,13 @@ export function AgentChatTranscript({
   );
 }
 
-// Shows the "preparing a response" dots when the agent is thinking OR while the
-// voice clone is being built (clone.state === 'cloning'), so there's never a
-// static screen during any cloning/upload delay. Split outer/inner because
-// useParticipantAttribute requires a participant — the agent may not exist yet.
+// Shows the "preparing a response" dots when the agent is thinking. (The clone
+// build has its own loading dot inside the clone-script card, so it's not shown
+// here to avoid a duplicate.)
 function ThinkingIndicator({ agentState }: { agentState?: AgentState }) {
-  const { agent } = useVoiceAssistant();
-  if (!agent) {
-    return (
-      <AnimatePresence>
-        {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
-      </AnimatePresence>
-    );
-  }
-  return <ThinkingIndicatorInner agentState={agentState} agent={agent} />;
-}
-
-function ThinkingIndicatorInner({
-  agentState,
-  agent,
-}: {
-  agentState?: AgentState;
-  agent: RemoteParticipant;
-}) {
-  const cloneState = useParticipantAttribute('clone.state', { participant: agent });
-  const show = agentState === 'thinking' || cloneState === 'cloning';
-  return <AnimatePresence>{show && <AgentChatIndicator size="sm" />}</AnimatePresence>;
+  return (
+    <AnimatePresence>
+      {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
+    </AnimatePresence>
+  );
 }

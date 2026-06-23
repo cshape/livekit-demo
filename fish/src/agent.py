@@ -131,8 +131,10 @@ async def _fix_tts_pronunciation(
         yield _LIVEKIT_RE.sub(replacement, buf)
 
 
-# Set LOG_TTS_PAYLOAD=0 to silence the per-utterance TTS payload log.
+# Debug logging toggles (set to 0 to silence). LOG_TTS_PAYLOAD logs the per-utterance
+# text Fish synthesizes; LOG_LLM_PROMPT logs the full per-turn LLM prompt.
 _LOG_TTS_PAYLOAD = os.getenv("LOG_TTS_PAYLOAD", "1") != "0"
+_LOG_LLM_PROMPT = os.getenv("LOG_LLM_PROMPT", "1") != "0"
 
 
 async def _log_tts_payload(text: AsyncIterable[str]) -> AsyncIterable[str]:
@@ -154,7 +156,31 @@ async def _log_tts_payload(text: AsyncIterable[str]) -> AsyncIterable[str]:
         fish = _pf.convert_markup("fishaudio", _pf.normalize_markup("fishaudio", full))
     except Exception:  # private API — never let logging break synthesis
         fish = "(conversion unavailable)"
-    logger.info("TTS→Fish | markup=%r | fish=%r", full, fish)
+    logger.info("\n┌─ TTS → Fish ──────────\n  markup: %s\n  fish:   %s\n└───────────────────────", full, fish)
+
+
+def _format_chat_ctx(chat_ctx) -> str:
+    """Render a ChatContext as a readable, newline-separated transcript for logging:
+    one block per message/tool item with its role, so the full prompt (instructions +
+    injected expressive guidance + history) is easy to scan."""
+    blocks: list[str] = []
+    for item in chat_ctx.items:
+        itype = getattr(item, "type", None)
+        if itype == "agent_config_update":
+            # Internal item that re-carries the instructions (already shown as a
+            # [system] message) as an escaped-newline repr — skip the duplicate noise.
+            continue
+        if itype == "function_call":
+            blocks.append(f"[tool_call] {getattr(item, 'name', '?')}({getattr(item, 'arguments', '')})")
+        elif itype == "function_call_output":
+            blocks.append(f"[tool_output] {getattr(item, 'output', '')}")
+        elif hasattr(item, "content") and hasattr(item, "role"):
+            content = item.content if isinstance(item.content, list) else [item.content]
+            parts = [c if isinstance(c, str) else f"<{type(c).__name__}>" for c in content]
+            blocks.append(f"[{item.role}]\n{chr(10).join(parts)}")
+        else:
+            blocks.append(f"[{itype or type(item).__name__}] {item!r}")
+    return "\n\n".join(blocks)
 
 
 # --- Prompt composition ------------------------------------------------------
@@ -630,6 +656,20 @@ class Assistant(Agent):
             f"You're now in {descriptor}. Give ONE short line right now in this new style so "
             "the user can hear the difference, then carry on the conversation."
         )
+
+    def llm_node(self, chat_ctx, tools, model_settings):
+        # Log the full per-turn prompt (instructions + injected expressive guidance +
+        # history) so the casual prompt can be tuned against exactly what the LLM sees.
+        if _LOG_LLM_PROMPT:
+            try:
+                logger.info(
+                    "\n╔═ LLM PROMPT (%d items) ═══\n%s\n╚═ end prompt ═════════════",
+                    len(chat_ctx.items),
+                    _format_chat_ctx(chat_ctx),
+                )
+            except Exception:  # logging must never break generation
+                logger.exception("LLM prompt logging failed")
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     def tts_node(self, text, model_settings):
         # Fix the "LiveKit" pronunciation in the audio only (transcript is unaffected).

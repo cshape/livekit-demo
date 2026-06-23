@@ -26,6 +26,14 @@ dev = [
 # install on Python 3.11+. Remove this once upstream uploads the remaining wheels.
 constraint-dependencies = ["yarl<1.24"]
 
+# Expressive mode (LLM-driven prosody markup) isn't in a livekit-agents release yet —
+# it lives on Cale's fork. Pull both the core SDK and the Fish Audio plugin from the
+# `cale/expressive-fish` branch (the Fish provider wiring spans both packages).
+# Track upstream progress at livekit/agents PR #6116 (tina/expressive-mode).
+[tool.uv.sources]
+livekit-agents = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-agents" }
+livekit-plugins-fishaudio = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-fishaudio" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

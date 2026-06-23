@@ -17,12 +17,20 @@ import {
 } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 
-// Strip Fish Audio [emotion] markers (e.g. "[excited] Got it!") so they
-// don't render in the chat transcript — they're TTS-only and look like noise
-// on screen.
+// Strip expressive delivery markup so it doesn't render in the chat transcript —
+// it's TTS-only and looks like noise on screen. The agent now emits the SDK's
+// abstract XML markup (e.g. <expression value="excited"/>, <sound …/>, <break …/>),
+// which the Agents framework already strips server-side before the transcript reaches
+// us. This is defense-in-depth: it also catches a tag that flashes mid-stream and any
+// stray Fish-native [brackets] the model might still freelance.
 function stripEmotionTags(text: string): string {
   return (
     text
+      // Complete <tag …/> or <tag>…</tag> markup.
+      .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
+      // A still-streaming, not-yet-closed XML tag (e.g. "<expression value=" before
+      // the ">" arrives) — hide from the trailing "<" so nothing flickers mid-stream.
+      .replace(/<[^<>]*$/, '')
       // Complete [tag] markers.
       .replace(/\[[^\]]*\]/g, '')
       // A still-streaming, not-yet-closed tag (e.g. "[speaks warmly" before the

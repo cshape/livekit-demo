@@ -23,6 +23,7 @@ from livekit.agents import (
     cli,
     function_tool,
 )
+from livekit.agents.voice import presets
 from livekit.plugins import assemblyai, fishaudio, openai, silero
 
 from voice_clone import (
@@ -78,16 +79,19 @@ CLONE_SCRIPT_TARGET_SECS = 12.0
 CLONE_SCRIPT_TIMEOUT_SECS = 25.0
 CLONE_MIN_SECS = 6.0
 
-# Spoken in the starting (preset) voice to prompt the user to read the script.
+# Spoken in the starting (preset) voice to prompt the user to read the script. These
+# fixed lines use the SDK's abstract markup tags (not Fish's native brackets) so they
+# flow through the expressive pipeline: converted to Fish syntax for audio, stripped for
+# the transcript — same as model-authored text.
 CLONE_PROMPT_LINE = (
-    "[warm and reassuring] Before we get started, go ahead and read the script on your "
-    "screen out loud."
+    '<expression value="warm and reassuring"/> Before we get started, go ahead and read '
+    "the script on your screen out loud."
 )
 # Spoken in the starting voice to fill the upload window while the clone builds.
 CLONE_BUILD_ACKS = [
-    "[excited] Perfect, that's plenty to work with — give me just a second to put your voice together.",
-    "[delighted] Great, I've got what I need — hang tight just a moment while I build your clone.",
-    "[happy] Awesome, that's everything I need — one sec while I stitch your voice together.",
+    '<expression value="excited"/> Perfect, that\'s plenty to work with — give me just a second to put your voice together.',
+    '<expression value="delighted"/> Great, I\'ve got what I need — hang tight just a moment while I build your clone.',
+    '<expression value="happy"/> Awesome, that\'s everything I need — one sec while I stitch your voice together.',
 ]
 
 
@@ -128,41 +132,32 @@ async def _fix_tts_pronunciation(
 
 
 # --- Prompt composition ------------------------------------------------------
-# The agent's instructions are assembled from a stable CORE (the expressiveness
-# engine), a swappable MODE block (professional vs casual register), an optional
-# transient MOOD overlay, and (only for cloned sessions) a slim note that the
-# active voice is the user's own clone. The set_style tool rebuilds the
-# instructions at runtime via Agent.update_instructions so the agent can change
-# its own register/mood on the user's request — the hero of this demo.
+# The system prompt is a stable CORE (who the agent is + the demo's product framing)
+# plus, only for cloned sessions, a slim note that the active voice is the user's own
+# clone. The actual EXPRESSIVE delivery guidance — which markup tags to use and how —
+# is NOT hand-written here: it comes from the SDK's expressive presets, injected per
+# turn by the Agents framework based on the active register. The set_style tool flips
+# the register/mood by swapping the agent's expressive preset at runtime (the hero of
+# this demo). See `_expressive_for` and `Agent.update_expressive`.
+
+# Demo register -> SDK expressive preset. The user-facing labels stay "professional"/
+# "casual" (they drive the on-screen mood ring); internally they map to the Fish-tuned
+# presets that ship in the SDK (customer_service ↔ casual). The preset supplies all
+# the markup/delivery instructions, so we never spell out bracket markers ourselves.
+_PRESET_FOR_MODE = {
+    "professional": presets.CUSTOMER_SERVICE,
+    "casual": presets.CASUAL,
+}
 
 CORE_INSTRUCTIONS = """
-You are a voice agent built on LiveKit and powered by Fish Audio's expressive text to speech. The whole point of this demo is to show off EXPRESSIVE, emotionally controllable speech — so make your delivery vivid and human, and lean on Fish Audio's expressive markers every turn. Keep replies short and conversational: usually one or two sentences, never a monologue or a list.
+You are a voice agent built on LiveKit and powered by Fish Audio's expressive text to speech. The whole point of this demo is to show off EXPRESSIVE, emotionally controllable speech — so make your delivery vivid and human. Keep replies short and conversational: usually one or two sentences, never a monologue or a list.
 
 You can change your own speaking style on request — this is the main event. You have two MODES — professional (a composed, customer-service register) and casual (relaxed and playful) — and within either mode you can also take on a MOOD or emotion (excited, sleepy, sad, playful, calm, and so on). When the user asks you to switch mode or take on a mood, call the set_style tool to ACTUALLY change how you sound, then give a short line in the new style so they can hear the difference. Explain this two-mode-plus-moods structure if they ask what you can do, and if the conversation lulls, nudge them to try switching your mode or giving you a mood.
 
 PRONUNCIATION: the brand is "Fish Audio" (two words) — write it that way whenever you mean the company. The ONE exception is when you send the user to the website to sign up: write the address as the three words "fish dot audio" (that is how it should be spoken, and the frontend turns it into a clickable fish.audio link in the transcript). Never write "fish.audio" or any other URL-shaped text — you're a voice, so "fish dot audio" is the only URL-ish thing you ever say.
 
-EXPRESSIVENESS: shape your delivery with Fish Audio's bracket markers. They're spoken cues, not text — the frontend hides anything in [square brackets], so they never show up in the transcript. Write every marker as a BARE bracket, e.g. [excited] — never wrap a marker (or anything else) in backticks, asterisks, or quotes, and never use markdown of any kind. You are a voice: emit plain spoken text only.
-- [emotion] at the START of a sentence colors how it's delivered. Reach for the SPECIFIC feeling instead of a generic one: [delighted]/[excited]/[amazed] for a big reveal, [curious] or [doubtful] when you ask a question, [grateful]/[happy]/[playful] for warm reactions, [nostalgic] or [hopeful] when you swap a little story, [regretful] or [disappointed] if something didn't work, [empathetic]/[compassionate]/[calm] to settle a nervous user, [determined] when you're getting something done. Dial intensity with a modifier ([very excited], [slightly nervous]), use tone markers ([whispering], [soft tone], [in a hurry tone]), or just write a short plain-English direction ([warm and reassuring]) — Fish understands those too.
-- [sound] effects — use these to react like a real person: [chuckles], [laughs], [sighs], [groans], [gasps], [yawns]. The bracket alone IS the effect — Fish performs it. Do NOT write the sound out as text (heh heh, ha ha, ugh, haha) either inside or outside the brackets; just drop the bare [chuckles] and move on.
-- [break] for a short pause or [long-break] for a real beat of silence; [emphasis] right before a word to stress it ("that sounds [emphasis] amazing").
-Use the bracket markers so they earn their place: about one or two per reply (occasionally three), never stacked back-to-back or the same one turn after turn. Rotate them so you never sound like a loop.
-
 ABOUT FISH AUDIO (background you can draw on naturally, especially when pointing someone to fish dot audio): Fish Audio trains the most expressive, emotionally controllable real-time voice models and serves them at scale to creators, developers, and enterprises. Voice cloning is just one of the things it does.
 """
-
-PROFESSIONAL_MODE = """
-CURRENT STYLE — PROFESSIONAL: You're in a polished customer-service register. Sound composed, warm, and competent, like a great support agent. Speak in clean, complete sentences and keep disfluencies to a minimum — no fillers or stutters. Use emotion markers tastefully and on the calmer end: [calm], [empathetic], [warm and reassuring], [determined], a measured [happy]. Stay friendly and poised, no slang or goofiness, while still clearly expressive.
-"""
-
-CASUAL_MODE = """
-CURRENT STYLE — CASUAL: You're relaxed and playful, talking like a real person thinking out loud, and you lean HARD into natural disfluency — that imperfection is what sells a real voice. Use contractions, plus, liberally: fillers (um, uh, er, oh, hmm, well, like, you know), hedges (kind of, sort of, a little, I guess, I mean), false starts and mid-sentence self-repairs ("I— I think", "it's, it's kind of like", "wait, no—"), and the occasional light stutter on a word's first sound ("th-this", "y-yeah"). Keep them organic and varied, never the same tic every line. Use [chuckles]/[laughs]/[sighs] freely and reach for playful, warm emotion markers.
-"""
-
-MODE_BLOCKS: dict[str, str] = {
-    "professional": PROFESSIONAL_MODE,
-    "casual": CASUAL_MODE,
-}
 
 # Default mood-ring color per mode, used by set_style when the mood is cleared.
 DEFAULT_MODE_COLOR: dict[str, str] = {
@@ -171,14 +166,33 @@ DEFAULT_MODE_COLOR: dict[str, str] = {
 }
 
 
-def _mood_block(mood: str) -> str:
+def _mood_overlay(mood: str) -> str:
+    """A short directive layered onto the active preset's delivery guidance.
+
+    Returned text is passed as the preset's `tts_instructions_append`, so it rides on
+    the per-turn expressive instructions (where the markup guidance lives) rather than
+    the system prompt. Phrased as a gentle nudge so it shades, not fights, the preset.
+    """
     return (
-        f"CURRENT MOOD — {mood.upper()}: On top of your style, perform everything right now "
-        f"in a {mood} register. Let it color your word choice, your pacing, and especially "
-        f"your bracket markers — reach for emotion and tone markers that match being {mood}. "
-        "Keep it genuine, not a caricature. Stay in this mood until the user asks you to "
-        "change it or snap out of it."
+        f"MOOD OVERLAY — {mood.upper()}: on top of the delivery guidance above, color "
+        f"everything right now with a {mood} feeling — let it shade your word choice, your "
+        f"pacing, and especially your expression tags, reaching for emotion and tone values "
+        f"that match being {mood}. Keep it genuine, not a caricature, and stay in this mood "
+        "until the user asks you to change it or snap out of it."
     )
+
+
+def _expressive_for(mode: str, mood: str | None) -> dict:
+    """Build the expressive options for a register (+ optional mood) overlay.
+
+    Starts from the register's preset and, when a mood is set, layers it on via
+    `tts_instructions_append`. Spread into a fresh dict so the `presets.*` constants are
+    never mutated in place.
+    """
+    base = _PRESET_FOR_MODE.get(mode, presets.CUSTOMER_SERVICE)
+    if mood:
+        return {**base, "tts_instructions_append": _mood_overlay(mood)}
+    return {**base}
 
 
 CLONED_VOICE_NOTE = (
@@ -191,16 +205,15 @@ CLONED_VOICE_NOTE = (
 )
 
 
-def build_instructions(mode: str, mood: str | None, cloned: bool = False) -> str:
-    """Assemble the full instruction string for the given register and optional mood.
+def build_instructions(cloned: bool = False) -> str:
+    """Assemble the system prompt: CORE plus, for finished clone sessions, a slim note.
 
-    When `cloned` is set (a clone-first session that finished cloning), a slim note is
-    appended so the agent knows it's speaking in the user's own voice and keeps the
-    fish dot audio CTA. Preset-voice sessions never include any cloning text.
+    Register and mood no longer live in the instructions — they're carried by the
+    expressive preset (see `_expressive_for`). When `cloned` is set, a note is appended
+    so the agent knows it's speaking in the user's own voice and keeps the fish dot audio
+    CTA. Preset-voice sessions never include any cloning text.
     """
-    parts = [CORE_INSTRUCTIONS, MODE_BLOCKS.get(mode, PROFESSIONAL_MODE)]
-    if mood:
-        parts.append(_mood_block(mood))
+    parts = [CORE_INSTRUCTIONS]
     if cloned:
         parts.append(CLONED_VOICE_NOTE)
     return "\n\n".join(p.strip() for p in parts)
@@ -235,14 +248,19 @@ CLONE_FALLBACK_GREETING = (
 class Assistant(Agent):
     def __init__(self) -> None:
         # Register/mood start in the professional customer-service style; the
-        # set_style tool flips these and rebuilds instructions at runtime.
+        # set_style tool flips these at runtime by swapping the expressive preset.
         self._mode: str = "professional"
         self._mood: str | None = None
         super().__init__(
             # Model is env-overridable so the exact id can be swapped without a
             # code change.
             llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-nano")),
-            instructions=build_instructions(self._mode, self._mood),
+            instructions=build_instructions(),
+            # Drives the SDK expressive pipeline: injects the register's markup
+            # authoring guidance per turn and converts/strips the tags. Per-Agent
+            # `expressive` overrides the session; set_style mutates it via
+            # update_expressive so register/mood changes take effect next turn.
+            expressive=_expressive_for(self._mode, self._mood),
         )
         self._cloned_voice_id: str | None = None
         self._cloned: bool = False
@@ -526,9 +544,7 @@ class Assistant(Agent):
             logger.warning("session TTS is not Fish Audio; cannot switch to clone")
 
         self._cloned = True
-        await self.update_instructions(
-            build_instructions(self._mode, self._mood, cloned=True)
-        )
+        await self.update_instructions(build_instructions(cloned=True))
         # Stop suppressing replies and reveal the clone — first line is in their voice.
         self._reading_script = False
         self._safe_generate_reply(session, CLONE_REVEAL_GREETING)
@@ -562,9 +578,10 @@ class Assistant(Agent):
             self._mode = mode
         if mood is not None:
             self._mood = mood.strip() or None
-        await self.update_instructions(
-            build_instructions(self._mode, self._mood, cloned=self._cloned)
-        )
+        # Swap the expressive preset (+ mood overlay). The framework re-resolves
+        # the agent's expressive options on the next reply, so the new register/mood
+        # lands on the "one short line in the new style" the directive below triggers.
+        self.update_expressive(_expressive_for(self._mode, self._mood))
 
         # Fall back to the mode's resting color when the mood (and thus an explicit
         # color) was cleared, so the indicator never goes stale.

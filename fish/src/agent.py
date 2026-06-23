@@ -131,6 +131,32 @@ async def _fix_tts_pronunciation(
         yield _LIVEKIT_RE.sub(replacement, buf)
 
 
+# Set LOG_TTS_PAYLOAD=0 to silence the per-utterance TTS payload log.
+_LOG_TTS_PAYLOAD = os.getenv("LOG_TTS_PAYLOAD", "1") != "0"
+
+
+async def _log_tts_payload(text: AsyncIterable[str]) -> AsyncIterable[str]:
+    """Tee the TTS text stream: forward every chunk unchanged, and once the
+    utterance completes, log the exact text Fish synthesizes. We log both the
+    markup form (the abstract XML the LLM emitted, after the LiveKit phoneme fix)
+    and the Fish-native form (markup converted to [brackets]) — the latter is what
+    actually hits the Fish API. Use it to dial in the casual disfluencies/markers."""
+    buf: list[str] = []
+    async for chunk in text:
+        buf.append(chunk)
+        yield chunk
+    full = "".join(buf).strip()
+    if not full:
+        return
+    try:
+        from livekit.agents.tts import _provider_format as _pf
+
+        fish = _pf.convert_markup("fishaudio", _pf.normalize_markup("fishaudio", full))
+    except Exception:  # private API — never let logging break synthesis
+        fish = "(conversion unavailable)"
+    logger.info("TTS→Fish | markup=%r | fish=%r", full, fish)
+
+
 # --- Prompt composition ------------------------------------------------------
 # The system prompt is a stable CORE (who the agent is + the demo's product framing)
 # plus, only for cloned sessions, a slim note that the active voice is the user's own
@@ -607,9 +633,10 @@ class Assistant(Agent):
 
     def tts_node(self, text, model_settings):
         # Fix the "LiveKit" pronunciation in the audio only (transcript is unaffected).
-        return Agent.default.tts_node(
-            self, _fix_tts_pronunciation(text, LIVEKIT_PHONEME), model_settings
-        )
+        stream = _fix_tts_pronunciation(text, LIVEKIT_PHONEME)
+        if _LOG_TTS_PAYLOAD:
+            stream = _log_tts_payload(stream)
+        return Agent.default.tts_node(self, stream, model_settings)
 
 
 server = AgentServer()

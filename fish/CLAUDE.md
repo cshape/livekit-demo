@@ -9,7 +9,7 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 ## Stack
 
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM**: OpenAI `gpt-5.4-nano` (`livekit-plugins-openai`); model overridable via `OPENAI_MODEL`.
+- **LLM**: OpenAI `gpt-5.4-mini` (`livekit-plugins-openai`); model overridable via `OPENAI_MODEL`.
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.

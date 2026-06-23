@@ -254,7 +254,7 @@ class Assistant(Agent):
         super().__init__(
             # Model is env-overridable so the exact id can be swapped without a
             # code change.
-            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-nano")),
+            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

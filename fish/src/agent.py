@@ -22,9 +22,10 @@ from livekit.agents import (
     StopResponse,
     cli,
     function_tool,
+    inference,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, openai, silero
+from livekit.plugins import assemblyai, fishaudio, silero
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -254,9 +255,13 @@ class Assistant(Agent):
         self._mode: str = "professional"
         self._mood: str | None = None
         super().__init__(
-            # Model is env-overridable so the exact id can be swapped without a
-            # code change.
-            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
+            # Gemma 4 (via LiveKit's inference gateway, "google/..." routes to Google)
+            # follows the expressive markup well and supports tools (set_style) +
+            # system instructions natively. Model is env-overridable (provider-prefixed,
+            # e.g. "openai/gpt-4.1-mini") so it can be swapped without a code change.
+            # Inference auth: LIVEKIT_INFERENCE_API_KEY/SECRET (falls back to
+            # LIVEKIT_API_KEY/SECRET) — must be LiveKit Cloud creds, not the dev key.
+            llm=inference.LLM(os.getenv("LLM_MODEL", "google/gemma-4-31b-it")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

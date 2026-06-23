@@ -9,7 +9,7 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 ## Stack
 
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM**: OpenAI `gpt-5.4-mini` (`livekit-plugins-openai`); model overridable via `OPENAI_MODEL`.
+- **LLM**: Google `gemma-4-31b-it` via LiveKit's inference gateway (`inference.LLM`, `google/...` route); overridable via `LLM_MODEL` (provider-prefixed). The gateway authenticates against LiveKit Cloud (`LIVEKIT_INFERENCE_API_KEY/SECRET`, falling back to `LIVEKIT_API_KEY/SECRET`), so it needs Cloud creds even when rooms run on the local dev server. Gemma 4 supports tools (`set_style`) + system instructions natively.
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
@@ -20,8 +20,11 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
+# LLM via inference gateway → LiveKit Cloud creds (local devkey won't auth):
+LIVEKIT_INFERENCE_API_KEY=...
+LIVEKIT_INFERENCE_API_SECRET=...
 ASSEMBLYAI_API_KEY=...
-OPENAI_API_KEY=...
+OPENAI_API_KEY=...  # optional: only for scripts/probe_tag_fidelity.py
 FISH_API_KEY=...
 ```
 

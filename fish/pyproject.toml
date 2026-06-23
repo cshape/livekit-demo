@@ -11,6 +11,7 @@ requires-python = ">=3.10, <3.15"
 dependencies = [
     "livekit-agents[assemblyai,openai,silero]>=1.6.0",
     "livekit-plugins-fishaudio>=1.6.0",
+    "livekit-plugins-google>=1.6.0",
     "python-dotenv",
 ]
 
@@ -33,6 +34,7 @@ constraint-dependencies = ["yarl<1.24"]
 [tool.uv.sources]
 livekit-agents = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-agents" }
 livekit-plugins-fishaudio = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-fishaudio" }
+livekit-plugins-google = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-google" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

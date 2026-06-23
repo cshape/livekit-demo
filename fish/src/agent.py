@@ -25,7 +25,7 @@ from livekit.agents import (
     inference,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, silero
+from livekit.plugins import assemblyai, fishaudio, google, silero
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -249,6 +249,28 @@ CLONE_FALLBACK_GREETING = (
 )
 
 
+def _build_llm():
+    """Construct the agent LLM. `LLM_BACKEND` selects the path:
+
+    - "inference" (default): LiveKit's inference gateway. `LLM_MODEL` is a
+      provider-prefixed id (e.g. "google/gemini-3.5-flash", "openai/gpt-oss-120b").
+      Auth via LIVEKIT_INFERENCE_API_KEY/SECRET (falls back to LIVEKIT_API_KEY/SECRET)
+      — must be LiveKit Cloud creds, not the dev key. NOTE: the public gateway does
+      NOT serve gemma-4-31b-it (returns "no deployment").
+    - "google": Google directly via the google plugin — the path for Gemma 4, which
+      Google hosts first-party on both the Gemini API and Vertex. `LLM_MODEL` is a bare
+      id (e.g. "gemma-4-31b-it"); a leading "google/" is stripped. The plugin auto-
+      picks the backend from GOOGLE_GENAI_USE_VERTEXAI:
+        * Gemini API (default): set GOOGLE_API_KEY (from Google AI Studio).
+        * Vertex AI: set GOOGLE_GENAI_USE_VERTEXAI=1, GOOGLE_CLOUD_PROJECT,
+          GOOGLE_CLOUD_LOCATION, and service-account creds (GOOGLE_APPLICATION_CREDENTIALS).
+    """
+    model = os.getenv("LLM_MODEL", "google/gemini-3.5-flash")
+    if os.getenv("LLM_BACKEND", "inference").lower() == "google":
+        return google.LLM(model=model.removeprefix("google/"))
+    return inference.LLM(model)
+
+
 class Assistant(Agent):
     def __init__(self) -> None:
         # Register/mood start in the professional customer-service style; the
@@ -256,15 +278,7 @@ class Assistant(Agent):
         self._mode: str = "professional"
         self._mood: str | None = None
         super().__init__(
-            # Gemini 3.5 Flash via LiveKit's inference gateway ("google/..." routes to
-            # Google). Follows the expressive markup well (natural disfluencies + tag
-            # variety) and supports tools (set_style) + system instructions. Model is
-            # env-overridable (provider-prefixed, e.g. "openai/gpt-4.1-mini") via
-            # LLM_MODEL. NOTE: gemma-4-31b-it is NOT on the public inference gateway
-            # (returns "no deployment") — use the google plugin directly for Gemma.
-            # Inference auth: LIVEKIT_INFERENCE_API_KEY/SECRET (falls back to
-            # LIVEKIT_API_KEY/SECRET) — must be LiveKit Cloud creds, not the dev key.
-            llm=inference.LLM(os.getenv("LLM_MODEL", "google/gemini-3.5-flash")),
+            llm=_build_llm(),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

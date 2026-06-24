@@ -26,12 +26,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dotenv import load_dotenv
-from livekit.agents.tts import _provider_format as pf
-from livekit.agents.voice import presets
-from openai import OpenAI
+from dotenv import load_dotenv  # noqa: E402
+from livekit.agents.tts import _provider_format as pf  # noqa: E402
+from livekit.agents.voice import presets  # noqa: E402
+from openai import OpenAI  # noqa: E402
 
-import src.agent as agent
+import src.agent as agent  # noqa: E402
 
 load_dotenv(".env.local")
 

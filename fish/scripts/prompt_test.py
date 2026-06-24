@@ -26,12 +26,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dotenv import load_dotenv  # noqa: E402
-from livekit.agents.tts import _provider_format as pf  # noqa: E402
-from livekit.agents.voice import presets  # noqa: E402
-from openai import OpenAI  # noqa: E402
+from dotenv import load_dotenv
+from livekit.agents.tts import _provider_format as pf
+from livekit.agents.voice import presets
+from openai import OpenAI
 
-import src.agent as agent  # noqa: E402
+import src.agent as agent
 
 load_dotenv(".env.local")
 
@@ -51,7 +51,7 @@ def system_prompt(mode: str, mood: str | None) -> str:
     opts = presets.resolve_options(
         agent._expressive_for(mode, mood),
         provider_key="fishaudio",
-        default=list(presets._REGISTRY["fishaudio"].values())[0],
+        default=next(iter(presets._REGISTRY["fishaudio"].values())),
     )
     return agent.CORE_INSTRUCTIONS.strip() + "\n\n" + str(opts["tts_instructions_template"])
 

@@ -22,9 +22,10 @@ const RING_COLORS: Record<string, { dot: string; glow: string }> = {
   violet: { dot: 'bg-violet-500', glow: 'shadow-[0_0_12px_2px] shadow-violet-500/60' },
 };
 
-// Live pipeline state → a short human label shown next to the mood while the agent
-// is actively doing something. When it's just listening we let the mood stand alone.
+// Live pipeline state → a short human label shown as grey subtext next to the mood.
+// `listening` is the window the user is speaking (until the agent flips to `thinking`).
 const STATE_LABEL: Partial<Record<AgentState, string>> = {
+  listening: 'listening',
   thinking: 'thinking',
   speaking: 'speaking',
   initializing: 'connecting',
@@ -56,22 +57,13 @@ function MoodIndicatorInner({
   const color = RING_COLORS[rawColor ?? ''] ?? RING_COLORS.green;
   const moodLabel = mood ? mood.charAt(0).toUpperCase() + mood.slice(1) : null;
 
-  // While the agent is `listening` (the window the user is speaking, until it flips
-  // to `thinking`), show a dedicated "Listening" state instead of the last mood — so
-  // the pill reflects that it's hearing you. Otherwise show the classified mood, with
-  // the live state as a faded suffix while thinking/speaking; before any mood lands,
-  // fall back to the state word.
-  let primary: string;
-  let suffix: string | null;
-  if (state === 'listening') {
-    primary = 'Listening';
-    suffix = null;
-  } else {
-    const stateLabel = STATE_LABEL[state];
-    primary =
-      moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
-    suffix = moodLabel && stateLabel ? stateLabel : null;
-  }
+  // The mood is always the primary label once we have one (e.g. "Curious"); the live
+  // pipeline state rides along as grey subtext ("Curious · listening" / "· speaking" /
+  // "· thinking"). Before any mood lands, fall back to showing the state word itself.
+  const stateLabel = STATE_LABEL[state];
+  const primary =
+    moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
+  const suffix = moodLabel && stateLabel ? stateLabel : null;
 
   // Pulse while actively engaged. Listening gets a softer, slower pulse than the
   // thinking/speaking beat so the two read differently at a glance.

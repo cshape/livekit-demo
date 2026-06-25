@@ -35,13 +35,23 @@ import src.agent as agent
 
 load_dotenv(".env.local")
 
-# Edit this set freely — a small spread of conversational situations.
-QUERIES = [
-    "hey, what can you do?",
-    "ugh, my order still hasn't shown up and it's been two weeks",
-    "haha okay that's actually hilarious, tell me a fun fact",
-    "eh, i dunno, just kind of hanging out",
-    "wait, what's the difference between your modes?",
+# Edit these freely. Casual = chatting like with a friend (should pull disfluency,
+# sounds, emotional range). Professional = customer-service use cases (returns,
+# billing, medical, tech support, info lookups).
+CASUAL_QUERIES = [
+    "yo what's up — what do you even do for fun?",
+    "haha okay that octopus thing is wild, hit me with another weird fact",
+    "ugh, I had the longest day, kinda just wanna veg out honestly",
+    "wait, no way — you can actually do different voices? that's kinda sick",
+    "eh, I'm bored, tell me something interesting or just make me laugh",
+]
+
+PROFESSIONAL_QUERIES = [
+    "Hi, I'd like to return a blender I bought last week — it stopped working after two uses.",
+    "I was charged twice for my subscription this month. Can you sort that out?",
+    "I'm calling about my prescription refill — is it ready for pickup yet?",
+    "My internet keeps dropping every few minutes and I work from home, this is a serious problem.",
+    "Can you tell me what time my appointment is on Thursday, and the address?",
 ]
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
@@ -67,7 +77,8 @@ def tag_counts(text: str) -> str:
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "casual"
     mood = (sys.argv[2] or None) if len(sys.argv) > 2 else None
-    queries = [sys.argv[3]] if len(sys.argv) > 3 else QUERIES
+    default_queries = PROFESSIONAL_QUERIES if mode == "professional" else CASUAL_QUERIES
+    queries = [sys.argv[3]] if len(sys.argv) > 3 else default_queries
 
     sp = system_prompt(mode, mood)
     client = OpenAI()

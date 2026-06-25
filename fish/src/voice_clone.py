@@ -121,16 +121,17 @@ def frames_to_wav(frames: list[rtc.AudioFrame]) -> bytes:
     sample_rate = frames[0].sample_rate
     num_channels = frames[0].num_channels
 
-    pcm = bytearray()
-    for f in frames:
-        pcm.extend(bytes(f.data.cast("B")))
-
+    # Stream each frame straight into the wave writer. Avoids building a full-size
+    # `pcm` bytearray and a `bytes(pcm)` copy of it (two extra whole-recording copies
+    # that, on the 512MB worker, helped tip voice-clone sessions into OOM). Peak here
+    # is the BytesIO (the wav) plus one small per-frame copy that's freed each loop.
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(num_channels)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
-        wf.writeframes(bytes(pcm))
+        for f in frames:
+            wf.writeframes(bytes(f.data.cast("B")))
     return buf.getvalue()
 
 

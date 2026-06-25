@@ -42,9 +42,10 @@ load_dotenv(".env.local")
 # which we read from ctx.job.metadata. Must match web/app-config.ts `agentName`.
 AGENT_NAME = "fish-demo"
 
-# Hard cap on buffered audio that gets uploaded to Fish. Long recordings get
-# truncated to the first CAPTURE_MAX_SECS of speech.
-CAPTURE_MAX_SECS = 60.0
+# Hard cap on buffered audio that gets uploaded to Fish. The clone read only needs
+# ~12-25s (see CLONE_SCRIPT_TARGET_SECS / _TIMEOUT_SECS), so cap well above that but
+# far below the old 60s — every buffered second is memory held on the 512MB worker.
+CAPTURE_MAX_SECS = 30.0
 
 # --- Voice selection ---------------------------------------------------------
 # The 4 preset Fish Audio voices offered on the landing page. The frontend sends
@@ -503,6 +504,10 @@ class Assistant(Agent):
                 logger.exception("VAD trim failed; using raw frames")
 
         wav_bytes = frames_to_wav(frames)
+        # Free the raw audio frames now (this is the only remaining reference, since the
+        # capture tee was cleared on hand-off) so they don't coexist with the WAV bytes
+        # and the multipart upload body in memory.
+        del frames
         model_id = await create_voice_clone(
             os.environ["FISH_API_KEY"],
             wav_bytes,
@@ -584,9 +589,13 @@ class Assistant(Agent):
 
         # Enough audio: build the clone while a short ack fills the upload window.
         await self._set_clone_state("cloning")
-        upload = asyncio.create_task(
-            self._run_clone_upload(list(self._capture.frames), session.vad)
-        )
+        # Hand the buffered frames to the upload task and release the capture tee's hold
+        # immediately, so we don't keep a second copy of the recording alive during the
+        # memory-heavy WAV build + upload on the 512MB worker.
+        frames = self._capture.frames
+        self._capture.frames = []
+        self._capture.recording = False
+        upload = asyncio.create_task(self._run_clone_upload(frames, session.vad))
         ack = None
         with contextlib.suppress(RuntimeError):
             ack = session.say(

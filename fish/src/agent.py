@@ -292,26 +292,24 @@ def build_instructions(cloned: bool = False) -> str:
 
 # Instructions for the one-shot greeting in a normal (preset-voice) session.
 PRESET_GREETING = (
-    "Greet the user in ONE or two short sentences, no more: say you're a LiveKit voice agent "
-    "powered by Fish Audio's expressive speech, you're in casual mode now, and they can flip "
-    "you to professional anytime with the toggle on screen. Keep it brief and warm — don't list, "
-    "don't over-explain, and don't mention voice cloning."
+    "Open the call warmly and briefly, then immediately turn it to the USER with one genuine, "
+    "curious question, like how they're doing today or how they came across this page. ONE or two "
+    "short sentences total. Do NOT mention modes, toggles, settings, or voice cloning, and don't "
+    "list anything. Keep it light, human, and inviting so they want to talk back."
 )
 # Greeting after a successful clone — first line is already in the cloned voice.
 CLONE_REVEAL_GREETING = (
-    "You are NOW speaking in a clone of the user's own voice, just built from the script "
-    "they read aloud. In one or two short sentences: warmly greet them and point out that "
-    "this is their own cloned voice. Then introduce that you're a LiveKit agent with Fish "
-    "Audio's expressive text to speech, you're in casual mode right now, and they can flip you "
-    "to professional with the on-screen toggle. Keep it short; don't over-explain the cloning."
+    "You are NOW speaking in a clone of the user's own voice, just built from the script they read "
+    "aloud. In one or two short sentences: warmly greet them, point out that this is their own "
+    "cloned voice, then turn it to them with a curious question like how they're doing or how they "
+    "found this page. Don't mention modes or toggles, and don't over-explain the cloning."
 )
 # Greeting when cloning was skipped/failed — stays in the starting preset voice.
 CLONE_FALLBACK_GREETING = (
     "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
-    "current voice. In one or two short sentences: lightly apologize that you couldn't quite "
-    "catch enough to clone them, then greet them as a LiveKit agent with Fish Audio's expressive "
-    "text to speech — in casual mode now, and they can flip you to professional with the on-screen "
-    "toggle. Don't dwell on the failure."
+    "current voice. In one or two short sentences: lightly apologize that you couldn't quite catch "
+    "enough to clone them, give a warm hello, and ask a curious question like how they're doing or "
+    "what brought them here. Don't mention modes or toggles, and don't dwell on the failure."
 )
 
 
@@ -321,9 +319,9 @@ class Assistant(Agent):
         # toggle (set_mode RPC -> apply_mode), which swaps the expressive preset.
         self._mode: str = "casual"
         super().__init__(
-            # Direct OpenAI (own API key). gpt-5.4-mini follows the expressive markup
-            # well and is fast/reliable. Model env-overridable.
-            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
+            # Direct OpenAI (own API key). gpt-5.1 follows the expressive markup well
+            # (rich casual disfluency/sounds, composed professional). Model env-overridable.
+            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.1")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent

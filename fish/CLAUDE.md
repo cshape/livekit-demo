@@ -9,7 +9,7 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 ## Stack
 
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM**: OpenAI `gpt-5.4-mini` (`livekit-plugins-openai`, direct via `OPENAI_API_KEY`); model overridable via `OPENAI_MODEL`. (We evaluated the LiveKit inference gateway and Google/Gemma: the gateway doesn't serve `gemma-4-31b-it`, and Gemma 4 via the google plugin breaks the `set_style` tool on Gemini's function-call turn-ordering rule when expressive instructions are injected — so the demo stays on OpenAI direct.)
+- **LLM**: OpenAI `gpt-5.1` (`livekit-plugins-openai`, direct via `OPENAI_API_KEY`); model overridable via `OPENAI_MODEL`. (The cosmetic mood-ring classifier runs separately on the cheaper `MOOD_MODEL`, default `gpt-4.1-mini`.) (We evaluated the LiveKit inference gateway and Google/Gemma: the gateway doesn't serve `gemma-4-31b-it`, and Gemma 4 via the google plugin breaks the `set_style` tool on Gemini's function-call turn-ordering rule when expressive instructions are injected — so the demo stays on OpenAI direct.)
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.

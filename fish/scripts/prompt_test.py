@@ -54,7 +54,7 @@ PROFESSIONAL_QUERIES = [
     "Can you tell me what time my appointment is on Thursday, and the address?",
 ]
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+MODEL = os.getenv("OPENAI_MODEL", "gpt-5.1")
 
 
 def system_prompt(mode: str, mood: str | None) -> str:

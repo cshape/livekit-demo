@@ -18,6 +18,7 @@ from livekit.agents import (
     JobContext,
     JobExecutorType,
     JobProcess,
+    RoomInputOptions,
     StopResponse,
     cli,
 )
@@ -364,6 +365,10 @@ class Assistant(Agent):
         # from `agent_state_changed` (wired in `my_agent`).
         self._agent_state: str = "initializing"
         self._own_attrs: dict[str, str] = {}
+        # Serialize attribute writes: a mode switch fires several at once (apply_mode's
+        # style.mode write + the demo line's mood-classifier write) which would otherwise
+        # interleave read-modify-write and could transiently drop keys.
+        self._attrs_lock: asyncio.Lock = asyncio.Lock()
         # Keep strong refs to fire-and-forget attribute pushes so the event loop
         # doesn't GC them mid-flight.
         self._bg_tasks: set[asyncio.Task[None]] = set()
@@ -380,17 +385,18 @@ class Assistant(Agent):
         """
         if self._job_ctx is None:
             return
-        self._own_attrs.update(mapping)
-        try:
-            participant = self._job_ctx.room.local_participant
-            merged = dict(participant.attributes)
-            # Re-assert the live agent state and all of our own attrs so this write
-            # (and the SDK's concurrent state writes) can't clobber each other.
-            merged["lk.agent.state"] = self._agent_state
-            merged.update(self._own_attrs)
-            await participant.set_attributes(merged)
-        except Exception:
-            logger.exception("failed to set attrs: %s", mapping)
+        async with self._attrs_lock:
+            self._own_attrs.update(mapping)
+            try:
+                participant = self._job_ctx.room.local_participant
+                merged = dict(participant.attributes)
+                # Re-assert the live agent state and all of our own attrs so this write
+                # (and the SDK's concurrent state writes) can't clobber each other.
+                merged["lk.agent.state"] = self._agent_state
+                merged.update(self._own_attrs)
+                await participant.set_attributes(merged)
+            except Exception:
+                logger.exception("failed to set attrs: %s", mapping)
 
     async def _set_clone_attrs(self, **values: str) -> None:
         """Push one or more `clone.*` participant attributes to the room."""
@@ -839,12 +845,32 @@ async def my_agent(ctx: JobContext):
     await session.start(
         agent=assistant,
         room=ctx.room,
+        # Don't tear the agent session down the instant the user's connection blips —
+        # give a brief reconnect a chance (the frontend stays on the call too).
+        room_input_options=RoomInputOptions(close_on_disconnect=False),
     )
 
     # Track the live agent state so our attribute writes never drop `lk.agent.state`
     # (session.start has already moved it to "listening").
     assistant._agent_state = session.agent_state
     session.on("agent_state_changed", assistant._on_agent_state_changed)
+
+    # Diagnostics: the "crash mid-utterance" is the frontend reacting to the AGENT
+    # participant briefly leaving the room. Log the agent's own RTC connection blips and
+    # any participant churn so the next occurrence is provable from the worker logs.
+    ctx.room.on(
+        "reconnecting", lambda: logger.warning("room RECONNECTING (agent-side blip)")
+    )
+    ctx.room.on("reconnected", lambda: logger.info("room reconnected"))
+    ctx.room.on(
+        "disconnected", lambda *a: logger.warning("room DISCONNECTED: %s", a or "")
+    )
+    ctx.room.on(
+        "participant_disconnected",
+        lambda p: logger.info(
+            "participant disconnected: %s", getattr(p, "identity", "?")
+        ),
+    )
 
     # (The cosmetic mood ring is driven from `tts_node` via `_mood_tee`, so it updates
     # as the agent starts speaking rather than after the turn is committed.)
@@ -853,11 +879,15 @@ async def my_agent(ctx: JobContext):
     # swaps the expressive preset and triggers a short demo line in the new register.
     @ctx.room.local_participant.register_rpc_method("set_mode")
     async def _handle_set_mode(data) -> str:
-        mode = (data.payload or "").strip().lower()
-        if mode not in _PRESET_FOR_MODE:
-            return json.dumps({"ok": False, "error": f"unknown mode {mode!r}"})
-        await assistant.apply_mode(session, mode)
-        return json.dumps({"ok": True, "mode": mode})
+        try:
+            mode = (data.payload or "").strip().lower()
+            if mode not in _PRESET_FOR_MODE:
+                return json.dumps({"ok": False, "error": f"unknown mode {mode!r}"})
+            await assistant.apply_mode(session, mode)
+            return json.dumps({"ok": True, "mode": mode})
+        except Exception as e:  # never let a switch error bubble into / disrupt the job
+            logger.exception("set_mode failed")
+            return json.dumps({"ok": False, "error": str(e)})
 
     # Seed the mood-ring indicator with the resting starting-mode state (both paths).
     await assistant._set_style_attrs(

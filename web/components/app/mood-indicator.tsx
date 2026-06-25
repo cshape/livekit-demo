@@ -54,21 +54,29 @@ function MoodIndicatorInner({
   const mood = useParticipantAttribute('style.mood', { participant: agent });
   const rawColor = useParticipantAttribute('style.color', { participant: agent });
 
-  const color = RING_COLORS[rawColor ?? ''] ?? RING_COLORS.green;
   const moodLabel = mood ? mood.charAt(0).toUpperCase() + mood.slice(1) : null;
 
-  // The mood is always the primary label once we have one (e.g. "Curious"); the live
-  // pipeline state rides along as grey subtext ("Curious · listening" / "· speaking" /
-  // "· thinking"). Before any mood lands, fall back to showing the state word itself.
+  // `failed` means the agent participant briefly dropped from the room (see
+  // useAgentErrors — we no longer end the call on this). Surface it as a calm,
+  // transient "Reconnecting…" state on an amber dot instead of a frozen mood pill.
+  const reconnecting = state === 'failed';
+  const color = reconnecting
+    ? RING_COLORS.amber
+    : (RING_COLORS[rawColor ?? ''] ?? RING_COLORS.green);
+
+  // Otherwise the mood is always the primary label once we have one (e.g. "Curious");
+  // the live pipeline state rides along as grey subtext ("Curious · listening" /
+  // "· speaking" / "· thinking"). Before any mood lands, fall back to the state word.
   const stateLabel = STATE_LABEL[state];
-  const primary =
-    moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
-  const suffix = moodLabel && stateLabel ? stateLabel : null;
+  const primary = reconnecting
+    ? 'Reconnecting…'
+    : (moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening'));
+  const suffix = reconnecting ? null : moodLabel && stateLabel ? stateLabel : null;
 
   // Pulse while actively engaged. Listening gets a softer, slower pulse than the
   // thinking/speaking beat so the two read differently at a glance.
   const isListening = state === 'listening';
-  const pulse = isListening || state === 'speaking' || state === 'thinking';
+  const pulse = reconnecting || isListening || state === 'speaking' || state === 'thinking';
   const pulseScale = isListening ? [1, 1.2, 1] : [1, 1.35, 1];
   const pulseOpacity = isListening ? [0.9, 0.5, 0.9] : [1, 0.7, 1];
   const pulseDuration = isListening ? 1.6 : 1.1;

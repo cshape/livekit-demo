@@ -75,7 +75,24 @@ def main() -> None:
     print(header)
     print("=" * len(header))
 
-    for q in queries:
+    # Markdown report (path overridable via MD_OUT; default sits next to this script).
+    md_path = os.getenv(
+        "MD_OUT",
+        os.path.join(os.path.dirname(__file__), f"prompt_report_{mode}{'_' + mood if mood else ''}.md"),
+    )
+    md: list[str] = [
+        f"# Prompt test — {mode}" + (f" · mood: {mood}" if mood else ""),
+        f"`{MODEL}` · system prompt **~{len(sp) // 4} tok**",
+        "",
+        "## Composed system prompt",
+        "```text",
+        sp,
+        "```",
+        "",
+        "## Responses",
+    ]
+
+    for i, q in enumerate(queries, 1):
         try:
             resp = client.chat.completions.create(
                 model=MODEL,
@@ -87,14 +104,31 @@ def main() -> None:
             raw = (resp.choices[0].message.content or "").strip()
         except Exception as e:
             print(f"\nUSER: {q}\n  [ERROR] {type(e).__name__}: {e}")
+            md += [f"\n### {i}. {q}", f"**ERROR** {type(e).__name__}: {e}"]
             continue
         fish = pf.convert_markup("fishaudio", pf.normalize_markup("fishaudio", raw))
-        transcript = pf.strip_markup("fishaudio", raw)
+        transcript = pf.strip_markup("fishaudio", raw).strip()
+        tags = tag_counts(raw)
         print(f"\nUSER: {q}")
         print(f"  RAW:        {raw}")
         print(f"  FISH:       {fish}")
-        print(f"  TRANSCRIPT: {transcript.strip()}")
-        print(f"  tags:       {tag_counts(raw)}")
+        print(f"  TRANSCRIPT: {transcript}")
+        print(f"  tags:       {tags}")
+        md += [
+            f"\n### {i}. {q}",
+            f"- **tags:** {tags}",
+            "",
+            "**RAW (model markup)**",
+            f"```\n{raw}\n```",
+            "**FISH (synthesized payload)**",
+            f"```\n{fish}\n```",
+            "**TRANSCRIPT (on-screen)**",
+            f"> {transcript}",
+        ]
+
+    with open(md_path, "w") as f:
+        f.write("\n".join(md) + "\n")
+    print(f"\n📝 markdown report → {md_path}")
 
 
 if __name__ == "__main__":

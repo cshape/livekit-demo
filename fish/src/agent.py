@@ -341,9 +341,6 @@ class Assistant(Agent):
         # Recent mood labels fed back into the classifier so it varies its word choice
         # turn to turn instead of getting stuck on one (e.g. "playful").
         self._recent_moods: list[str] = []
-        # Handle for the "hear the new register" demo line, so a rapid burst of toggles
-        # doesn't stack interrupting generate_reply calls (which flaps agent state).
-        self._mode_demo_handle: SpeechHandle | None = None
         self._cloned_voice_id: str | None = None
         self._cloned: bool = False
         self._job_ctx: JobContext | None = None
@@ -653,14 +650,12 @@ class Assistant(Agent):
 
         Swaps the agent's expressive preset (the framework re-resolves it on the next
         reply), echoes the new register to the frontend via `style.mode`, and — unless
-        we're mid clone-read — fires a short demo line so the user immediately hears the
-        new voice. Idempotent: a redundant switch still re-asserts the preset and attr.
+        we're mid clone-read — reacts in the new voice. Idempotent: a redundant switch
+        still re-asserts the preset and attr.
 
-        The preset swap is always applied immediately, but the spoken demo is SKIPPED
-        while a previous switch's demo is still in flight. That keeps a rapid burst of
-        toggles from stacking interrupting generate_reply calls (which flaps the agent
-        state fast enough to trip the SDK's agent-health check); the latest register is
-        still active for the next real turn, and a demo plays once the user settles.
+        If the agent is mid-utterance when the user flips the toggle, we CANCEL the
+        current line (stop playback) and immediately respond in the new register, so the
+        switch feels instant rather than waiting for the old line to finish.
         """
         if mode not in _PRESET_FOR_MODE:
             logger.warning("ignoring unknown mode: %r", mode)
@@ -672,12 +667,12 @@ class Assistant(Agent):
         logger.info("mode switched -> %s", mode)
         if not changed or self._reading_script:
             return
-        if self._mode_demo_handle is not None and not self._mode_demo_handle.done():
-            logger.info(
-                "prior mode demo still in flight; applying preset without a new demo line"
-            )
-            return
-        self._mode_demo_handle = self._safe_generate_reply(
+        # Cut off whatever the agent is currently saying so the new tone lands right
+        # away. interrupt() is a no-op when nothing is speaking; force so an in-progress
+        # (interruptible) line always stops.
+        with contextlib.suppress(Exception):
+            await session.interrupt(force=True)
+        self._safe_generate_reply(
             session,
             f"The user just switched you to {mode} mode using the on-screen toggle. "
             f"In ONE short, natural line, react and let them hear your {mode} voice, "

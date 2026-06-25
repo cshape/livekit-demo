@@ -17,6 +17,7 @@ from livekit.agents import (
     ChatContext,
     ChatMessage,
     JobContext,
+    JobExecutorType,
     JobProcess,
     RunContext,
     StopResponse,
@@ -684,11 +685,21 @@ class Assistant(Agent):
         return Agent.default.tts_node(self, stream, model_settings)
 
 
-# num_idle_processes prewarms job subprocesses; the SDK's prod default is 18, and
-# each one loads the agents runtime + silero VAD (~150-200MB), which blows past
-# Render's 512MB Starter tier. Keep a tiny pool (env-overridable) so memory stays
-# bounded — a single idle process keeps first-call latency low for the demo.
-server = AgentServer(num_idle_processes=int(os.getenv("NUM_IDLE_PROCESSES", "1")))
+# Memory: Render's 512MB Starter tier can't fit multiple PROCESS-mode job workers
+# (each carries a full copy of the 1.6.2 runtime + silero VAD, ~150-250MB; the main
+# worker + an idle + an active job blow past 512MB → OOM). Run jobs as THREADS in a
+# single process instead, so the runtime/VAD load once and are shared. Lower
+# concurrency on a small box anyway. Both knobs are env-overridable; flip
+# JOB_EXECUTOR=process (+ a bigger plan) if you need process isolation.
+_EXECUTOR = (
+    JobExecutorType.THREAD
+    if os.getenv("JOB_EXECUTOR", "thread").lower() == "thread"
+    else JobExecutorType.PROCESS
+)
+server = AgentServer(
+    job_executor_type=_EXECUTOR,
+    num_idle_processes=int(os.getenv("NUM_IDLE_PROCESSES", "1")),
+)
 
 
 def prewarm(proc: JobProcess):

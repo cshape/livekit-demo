@@ -2,7 +2,7 @@
 
 LiveKit Agents (Python) **expressive-voice** demo (Fish Audio TTS). Single agent at `src/agent.py`, voice-clone helpers at `src/voice_clone.py`. React frontend in sibling dir at `../web/` (Next.js 15 + Tailwind v4 + shadcn + `@livekit/components-react`, bootstrapped from the `agent-starter-react` template).
 
-**Landing page picks the voice up front.** The user either chooses one of 4 preset Fish voices or "clone your voice" (reads a short script, then the call begins in their clone). That choice rides **agent metadata** to the worker via NAMED dispatch. On top of any voice, the agent can switch register (professional/casual) and mood at runtime via the `set_style` tool (drives the mood-ring indicator).
+**Landing page picks the voice up front.** The user either chooses one of 4 preset Fish voices or "clone your voice" (reads a short script, then the call begins in their clone). That choice rides **agent metadata** to the worker via NAMED dispatch. On top of any voice, the **user** flips the speaking register (casual/professional) with an on-screen toggle — a `set_mode` RPC swaps the agent's expressive preset and triggers a short demo line — and a **separate, cosmetic mood-classifier LLM** (in the agent process) reads each line the agent speaks and drives the on-screen mood ring. There is no `set_style` tool and no agent-controlled mood anymore.
 
 This is a LiveKit Agents (Python) project: use `uv` for everything, app code lives under `src/` with `agent.py` as the entrypoint, and `uv run ruff check src/` / `uv run ruff format src/` must stay green. For up-to-date LiveKit docs, use the `lk docs` CLI or the LiveKit docs MCP server.
 
@@ -76,20 +76,20 @@ Open http://localhost:3000, hit "Start call". The frontend uses **named dispatch
 
 ## Expressiveness & style switching (the demo's hero)
 
-The demo leads with **expressive TTS**, not cloning. The agent opens by introducing itself as a Fish Audio-powered expressive voice in **professional** mode and invites the user to change its register or mood; cloning is a secondary, opt-in offer.
+The demo leads with **expressive TTS**, not cloning. The agent opens (in **casual** mode) by introducing itself as a Fish Audio-powered expressive voice and noting the user can flip it to professional with the on-screen toggle; cloning is a secondary, opt-in offer.
 
-- **Prompt composition** (`agent.py`): instructions are assembled by `build_instructions(mode, mood, cloned)` from `CORE_INSTRUCTIONS` (the expressiveness engine — bracket markers, pronunciation, Fish background) + a swappable `MODE_BLOCKS[mode]` (`professional` = composed customer-service register, low disfluency; `casual` = relaxed/playful/disfluent) + an optional transient `_mood_block(mood)` overlay + (only after a successful clone) a slim `CLONED_VOICE_NOTE`. `Assistant` tracks `self._mode` (default `"professional"`), `self._mood` (default `None`), and `self._cloned`.
-- **`set_style` tool**: `set_style(mode?, mood?, color?)` — the LLM calls this when the user asks to switch register or take on a mood. It updates `_mode`/`_mood`, rebuilds instructions via `await self.update_instructions(...)`, writes `style.*` participant attributes, and returns a directive to demo the new style. `mode`/`color` are `Literal` enums (real JSON-schema enums); `mood` is free text (empty string clears it).
-- **Reconcile the prompts with Tina's branch**: the `professional`/`casual` blocks here are drafts. Tina maintains `casual`/`customer_service` expressive prompts (her livekit/agents branch + what she pushed to `cale/expressive-fish`) — fold those in when integrating with the SDK's real expressiveness setting.
-
-The `professional`-vs-`casual` split maps to the two prompt families that the upstream expressiveness setting will ship; this demo hard-codes the prompt text until that setting lands in the Agents SDK.
+- **Expressive delivery comes from the SDK presets, not the prompt.** `_PRESET_FOR_MODE` maps the user-facing register to an SDK expressive preset (`casual` → `presets.CASUAL`, `professional` → `presets.CUSTOMER_SERVICE`). `_expressive_for(mode)` spreads the preset into a fresh dict; the Agents framework injects that register's markup-authoring guidance per turn and converts/strips the XML tags. `CORE_INSTRUCTIONS` carries only persona + product framing + the "fish dot audio" rule — never bracket/tag tutorials.
+- **Register switch is USER-driven (no tool).** The frontend toggle (`web/components/app/mode-toggle.tsx`) calls the agent's **`set_mode` RPC** (registered on the agent's local participant in `my_agent`). The handler calls `Assistant.apply_mode(session, mode)`, which: sets `self._mode`, calls `self.update_expressive(_expressive_for(mode))` (re-resolved next reply), echoes `style.mode` back, and — unless mid clone-read — fires a one-line demo reply in the new register via `_safe_generate_reply`. `Assistant` tracks `self._mode` (default `"casual"`) and `self._cloned`.
+- **Mood is a separate, cosmetic LLM — it never touches the agent's prompt or delivery.** On every `conversation_item_added` for an assistant message, `Assistant._on_conversation_item_added` (re)launches `_classify_mood`: a cheap, independent `AsyncOpenAI` call (`MOOD_MODEL`, default `gpt-4.1-mini`) that reads the spoken line, returns `{mood, color}` JSON, and writes `style.mood`/`style.color`. Only the latest line matters (a still-running classification is cancelled). Best-effort: failures are logged and swallowed.
 
 ## Frontend: `style.*` mood-ring indicator
 
-`set_style` writes three participant attributes that drive `web/components/app/mood-indicator.tsx` (a small pill in the bottom cluster, above the control bar):
-- `style.mode` — `professional` | `casual` (label text).
-- `style.mood` — free-text mood word, or `""` when neutral.
-- `style.color` — one of `gray`/`amber`/`green`/`blue`/`violet`, a **mood-ring** color the LLM picks to match the mood (gray = tense, amber = unsettled, green = calm, blue = happy/at-ease, violet = passionate/excited). The component maps it to a glowing dot. Seeded to the mode's resting color (`DEFAULT_MODE_COLOR`) on session start and when the mood is cleared.
+Three `style.*` participant attributes drive the bottom-cluster UI (in `agent-session-block.tsx`, above the slim mic + END CALL control bar):
+- `style.mode` — `casual` | `professional`. Written by `apply_mode` (the RPC handler) to echo the applied register; read by `web/components/app/mode-toggle.tsx`, which reconciles its optimistic state against it.
+- `style.mood` — the one-word feeling from the mood-classifier LLM (`""` until the first classification). Read by `web/components/app/mood-indicator.tsx`.
+- `style.color` — one of `gray`/`amber`/`green`/`blue`/`violet`, picked by the same classifier (gray = tense, amber = unsettled, green = calm, blue = happy/at-ease, violet = passionate/excited). The mood-indicator maps it to a glowing, state-aware dot (it pulses while the agent is thinking/speaking and shows the live state next to the mood). Seeded to the mode's resting color (`DEFAULT_MODE_COLOR`) on session start.
+
+The text-chat input was removed (voice-only): `agent-control-bar.tsx` no longer has the chat input/toggle, and the transcript panel is always shown.
 
 ## Voice selection: landing page → agent (NAMED dispatch + agent metadata)
 
@@ -141,10 +141,10 @@ Preset sessions skip all of this: `my_agent` just seeds the mood-ring and `gener
 
 ## Editing conventions
 
-- One `Agent` subclass (`Assistant`); `set_style` is the only `@function_tool`. The clone flow is driven imperatively from `run_clone_first` (a coroutine), not by an LLM tool. No agent handoffs / `AgentTask` unless the flow grows.
+- One `Agent` subclass (`Assistant`); **no `@function_tool`s** — register switching is a `set_mode` RPC (frontend → `apply_mode`), and the clone flow is driven imperatively from `run_clone_first` (a coroutine). No agent handoffs / `AgentTask` unless the flow grows.
 - For any "the agent should speak something not from the LLM" use `session.say(text, add_to_chat_ctx=...)`. The clone-first prompt/ack use `add_to_chat_ctx=False` (system-only cues) so the LLM's chat context stays clean.
 - To keep the agent silent for a stretch of user turns (e.g. while they read the clone script), set a flag and raise `StopResponse` from `on_user_turn_completed` (and no-op `on_user_turn_exceeded`). The activity catches `StopResponse` and skips that turn's reply while still flushing the STT transcript.
-- `build_instructions(mode, mood, cloned)` is the single source of the system prompt; rebuild + `update_instructions(...)` whenever mode/mood/cloned changes (`set_style` and the post-clone swap both do this).
+- `build_instructions(cloned=False)` is the single source of the system prompt (CORE + an optional cloned-voice note); the register/mood are NOT in it. Register changes go through `update_expressive(...)` (preset swap), not `update_instructions(...)`; only the post-clone swap rebuilds instructions (to add `CLONED_VOICE_NOTE`).
 - **Fixing TTS pronunciation without changing the transcript**: override `Agent.tts_node` (audio) — NOT `transcription_node` (the on-screen text). `Assistant.tts_node` streams the text through `_fix_tts_pronunciation`, which rewrites `LiveKit` → `LIVEKIT_PHONEME` (`<|phoneme_start|>L AY1 V<|phoneme_end|> Kit`) so Fish stops saying "liv-kit". Direct-API testing nailed down the format: phoneme control **does** work on s2.1-pro (an `<|phoneme_start|>EH1 N JH AH0 N IH1 R<|phoneme_end|>` reliably says "engineer"), but the full-word phoneme `L AY1 V K IH0 T` broke it — a phoneme on just "Live" plus a plain "Kit" is what lands. The streaming rewrite holds back only a trailing prefix-of-"livekit" so the word is never split across chunk boundaries. Note: cloned voices honor this less reliably than base voices, but a single approach is used for simplicity.
 
 ## Project layout

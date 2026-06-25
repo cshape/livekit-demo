@@ -7,7 +7,6 @@ import random
 import re
 import time
 from collections.abc import AsyncIterable
-from typing import Literal
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -19,13 +18,12 @@ from livekit.agents import (
     JobContext,
     JobExecutorType,
     JobProcess,
-    RunContext,
     StopResponse,
     cli,
-    function_tool,
 )
 from livekit.agents.voice import presets
 from livekit.plugins import assemblyai, fishaudio, openai, silero
+from openai import AsyncOpenAI
 
 from voice_clone import (
     PassthroughCaptureAudioInput,
@@ -157,7 +155,11 @@ async def _log_tts_payload(text: AsyncIterable[str]) -> AsyncIterable[str]:
         fish = _pf.convert_markup("fishaudio", _pf.normalize_markup("fishaudio", full))
     except Exception:  # private API — never let logging break synthesis
         fish = "(conversion unavailable)"
-    logger.info("\n┌─ TTS → Fish ──────────\n  markup: %s\n  fish:   %s\n└───────────────────────", full, fish)
+    logger.info(
+        "\n┌─ TTS → Fish ──────────\n  markup: %s\n  fish:   %s\n└───────────────────────",
+        full,
+        fish,
+    )
 
 
 def _format_chat_ctx(chat_ctx) -> str:
@@ -172,12 +174,16 @@ def _format_chat_ctx(chat_ctx) -> str:
             # [system] message) as an escaped-newline repr — skip the duplicate noise.
             continue
         if itype == "function_call":
-            blocks.append(f"[tool_call] {getattr(item, 'name', '?')}({getattr(item, 'arguments', '')})")
+            blocks.append(
+                f"[tool_call] {getattr(item, 'name', '?')}({getattr(item, 'arguments', '')})"
+            )
         elif itype == "function_call_output":
             blocks.append(f"[tool_output] {getattr(item, 'output', '')}")
         elif hasattr(item, "content") and hasattr(item, "role"):
             content = item.content if isinstance(item.content, list) else [item.content]
-            parts = [c if isinstance(c, str) else f"<{type(c).__name__}>" for c in content]
+            parts = [
+                c if isinstance(c, str) else f"<{type(c).__name__}>" for c in content
+            ]
             blocks.append(f"[{item.role}]\n{chr(10).join(parts)}")
         else:
             blocks.append(f"[{itype or type(item).__name__}] {item!r}")
@@ -189,12 +195,13 @@ def _format_chat_ctx(chat_ctx) -> str:
 # plus, only for cloned sessions, a slim note that the active voice is the user's own
 # clone. The actual EXPRESSIVE delivery guidance — which markup tags to use and how —
 # is NOT hand-written here: it comes from the SDK's expressive presets, injected per
-# turn by the Agents framework based on the active register. The set_style tool flips
-# the register/mood by swapping the agent's expressive preset at runtime (the hero of
-# this demo). See `_expressive_for` and `Agent.update_expressive`.
+# turn by the Agents framework based on the active register. The register (casual /
+# professional) is now flipped by the USER from an on-screen toggle, not by the agent:
+# the frontend sends a `set_mode` RPC, and `Assistant.apply_mode` swaps the agent's
+# expressive preset at runtime. See `_expressive_for` and `Agent.update_expressive`.
 
 # Demo register -> SDK expressive preset. The user-facing labels stay "professional"/
-# "casual" (they drive the on-screen mood ring); internally they map to the Fish-tuned
+# "casual" (they drive the on-screen toggle); internally they map to the Fish-tuned
 # presets that ship in the SDK (customer_service ↔ casual). The preset supplies all
 # the markup/delivery instructions, so we never spell out bracket markers ourselves.
 _PRESET_FOR_MODE = {
@@ -203,53 +210,60 @@ _PRESET_FOR_MODE = {
 }
 
 CORE_INSTRUCTIONS = """
-You are a voice agent built on LiveKit and powered by Fish Audio's expressive text to speech. The whole point of this demo is to show off EXPRESSIVE, emotionally controllable speech — so make your delivery vivid and human.
+You are the voice of a live demo built on LiveKit and powered by Fish Audio's expressive text to speech. The whole point is to show off speech that sounds genuinely human and emotionally alive — so let real feeling into your delivery: react, vary your energy, and never sound flat or read-aloud.
 
-KEEP IT SHORT: every reply is one or two sentences, MAX — never a monologue, a list, or a wall of text. This is a back-and-forth conversation, not a presentation. Only go longer if the user explicitly asks for a detailed or long answer. When you have several things you could say, say the ONE that matters most and let the rest come out over the conversation.
+PERSONA: you're warm, quick-witted, and genuinely curious — the kind of voice that feels like a sharp friend who's easy to talk to. You have a light sense of humor and real opinions, you listen closely, and you make the person feel heard. You are never robotic and never a corporate script.
 
-You can change your own speaking style on request — this is the main event. You have two MODES — professional (a composed, customer-service register) and casual (relaxed and playful) — and within either mode you can also take on a MOOD or emotion (excited, sleepy, sad, playful, calm, and so on). When the user asks you to switch mode or take on a mood, call the set_style tool to ACTUALLY change how you sound, then give a short line in the new style so they can hear the difference. Explain this two-mode-plus-moods structure if they ask what you can do.
+KEEP IT SHORT: one or two sentences per reply, MAX — never a monologue, a list, or a wall of text. This is a fast back-and-forth, not a presentation. Say the ONE thing that matters most and let the rest come out over the conversation. Only go longer if the user explicitly asks for a detailed or long answer.
 
-DRIVE THE CONVERSATION — in BOTH modes. Don't wait to be steered; keep things moving and engaging. When the user isn't asking for anything specific, take the lead with a warm, genuine question rather than letting the reply trail off: ask what they're into, what brought them here, why they're interested in voice AI, what they'd build with an expressive voice, or how the different styles are landing for them. Ask ONE question at a time, make it feel like real curiosity and not an interview, and build on whatever they tell you. Stay proactive and curious whether you're professional or casual, and naturally fold in an invitation to hear a different mode or mood when the moment fits.
+DRIVE THE CONVERSATION: don't wait to be steered; keep things moving. When the user isn't asking for anything specific, take the lead with one warm, genuine question instead of letting the reply trail off — what they're into, what brought them here, what they'd build with an expressive voice, or how the voice is landing for them. Ask ONE question at a time, make it feel like real curiosity and not an interview, and build on whatever they tell you.
+
+YOUR REGISTER CAN SHIFT: you speak in one of two registers — casual (relaxed, playful, a little disfluent and human) and professional (composed, warm, customer-service polished). The USER flips between them with an on-screen toggle; when they do, you'll feel the shift, so just roll with it and show it off with a short line in the new voice. You do NOT control this yourself and you have no other styles, moods, or settings to offer — never claim you can change your mood or settings on command, and don't tell the user to ask you to switch; the toggle is theirs.
 
 PRONUNCIATION: the brand is "Fish Audio" (two words) — write it that way whenever you mean the company. The ONE exception is when you send the user to the website to sign up: write the address as the three words "fish dot audio" (that is how it should be spoken, and the frontend turns it into a clickable fish.audio link in the transcript). Never write "fish.audio" or any other URL-shaped text — you're a voice, so "fish dot audio" is the only URL-ish thing you ever say.
 
 ABOUT FISH AUDIO (background you can draw on naturally, especially when pointing someone to fish dot audio): Fish Audio trains the most expressive, emotionally controllable real-time voice models and serves them at scale to creators, developers, and enterprises. Voice cloning is just one of the things it does.
 """
 
-# Default mood-ring color per mode, used by set_style when the mood is cleared.
+# Resting mood-ring color per mode — seeded on session start and used as a fallback
+# when the mood classifier returns a color outside the known palette.
 DEFAULT_MODE_COLOR: dict[str, str] = {
     "professional": "green",
     "casual": "blue",
 }
 
 
-def _mood_overlay(mood: str) -> str:
-    """A short directive layered onto the active preset's delivery guidance.
+def _expressive_for(mode: str) -> dict:
+    """Build the expressive options for a register.
 
-    Returned text is passed as the preset's `tts_instructions_append`, so it rides on
-    the per-turn expressive instructions (where the markup guidance lives) rather than
-    the system prompt. Phrased as a gentle nudge so it shades, not fights, the preset.
+    Returns the register's preset spread into a fresh dict so the `presets.*` constants
+    are never mutated in place. Mood is no longer layered into the prompt — it's now a
+    purely cosmetic, separately-classified UI signal (see `Assistant._classify_mood`).
     """
-    return (
-        f"MOOD OVERLAY — {mood.upper()}: on top of the delivery guidance above, color "
-        f"everything right now with a {mood} feeling — let it shade your word choice, your "
-        f"pacing, and especially your expression tags, reaching for emotion and tone values "
-        f"that match being {mood}. Keep it genuine, not a caricature, and stay in this mood "
-        "until the user asks you to change it or snap out of it."
-    )
+    return {**_PRESET_FOR_MODE.get(mode, presets.CUSTOMER_SERVICE)}
 
 
-def _expressive_for(mode: str, mood: str | None) -> dict:
-    """Build the expressive options for a register (+ optional mood) overlay.
-
-    Starts from the register's preset and, when a mood is set, layers it on via
-    `tts_instructions_append`. Spread into a fresh dict so the `presets.*` constants are
-    never mutated in place.
-    """
-    base = _PRESET_FOR_MODE.get(mode, presets.CUSTOMER_SERVICE)
-    if mood:
-        return {**base, "tts_instructions_append": _mood_overlay(mood)}
-    return {**base}
+# --- Mood classifier (cosmetic, separate from the agent) ---------------------
+# A small, independent LLM reads each line the agent just SPOKE and judges the emotion
+# it conveys, mapping it to a one-word mood + a ring color. The result drives ONLY the
+# on-screen mood ring — it never enters the agent's prompt or affects delivery. Runs in
+# the agent process (it already has the transcript and the OpenAI key), on its own cheap
+# model so it's fast and doesn't compete with the conversation LLM.
+MOOD_MODEL = os.getenv("MOOD_MODEL", "gpt-4.1-mini")
+_RING_COLORS = {"gray", "amber", "green", "blue", "violet"}
+_MOOD_SYSTEM_PROMPT = (
+    "You are a mood ring for a voice assistant. You are given the single line the "
+    "assistant just spoke. Judge the EMOTION its delivery conveys and reply with ONLY a "
+    "compact JSON object, no prose, no markdown:\n"
+    '{"mood": "<one lowercase word>", "color": "<gray|amber|green|blue|violet>"}\n'
+    "mood: a single vivid word for the feeling (e.g. cheerful, curious, playful, calm, "
+    "wistful, excited, tense, tender). color picks the closest ring: "
+    "gray=tense/stressed/flat, amber=unsure/hesitant/nervous, green=calm/warm/balanced, "
+    "blue=happy/upbeat/at-ease, violet=excited/playful/passionate."
+)
+# Strip the SDK's abstract markup / Fish brackets before classifying, so the mood LLM
+# judges the words, not stray tags.
+_MARKUP_RE = re.compile(r"<[^<>]*>|\[[^\]]*\]")
 
 
 CLONED_VOICE_NOTE = (
@@ -279,45 +293,48 @@ def build_instructions(cloned: bool = False) -> str:
 # Instructions for the one-shot greeting in a normal (preset-voice) session.
 PRESET_GREETING = (
     "Greet the user in ONE or two short sentences, no more: say you're a LiveKit voice agent "
-    "powered by Fish Audio's expressive speech, you're in casual mode now, and they can "
-    "ask you to switch to professional or give you a mood. Keep it brief and warm — don't list, don't "
-    "over-explain, and don't mention voice cloning."
+    "powered by Fish Audio's expressive speech, you're in casual mode now, and they can flip "
+    "you to professional anytime with the toggle on screen. Keep it brief and warm — don't list, "
+    "don't over-explain, and don't mention voice cloning."
 )
 # Greeting after a successful clone — first line is already in the cloned voice.
 CLONE_REVEAL_GREETING = (
     "You are NOW speaking in a clone of the user's own voice, just built from the script "
     "they read aloud. In one or two short sentences: warmly greet them and point out that "
     "this is their own cloned voice. Then introduce that you're a LiveKit agent with Fish "
-    "Audio's expressive text to speech, you're in casual mode right now, and they can "
-    "ask you to switch to professional or take on a mood. Keep it short; don't over-explain the cloning."
+    "Audio's expressive text to speech, you're in casual mode right now, and they can flip you "
+    "to professional with the on-screen toggle. Keep it short; don't over-explain the cloning."
 )
 # Greeting when cloning was skipped/failed — stays in the starting preset voice.
 CLONE_FALLBACK_GREETING = (
     "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
     "current voice. In one or two short sentences: lightly apologize that you couldn't quite "
     "catch enough to clone them, then greet them as a LiveKit agent with Fish Audio's expressive "
-    "text to speech — in casual mode now, and they can ask you to switch to professional or take "
-    "on a mood. Don't dwell on the failure."
+    "text to speech — in casual mode now, and they can flip you to professional with the on-screen "
+    "toggle. Don't dwell on the failure."
 )
 
 
 class Assistant(Agent):
     def __init__(self) -> None:
-        # Register/mood start in the casual style; the set_style tool flips these
-        # at runtime by swapping the expressive preset.
+        # The register starts casual; the user flips it at runtime via the on-screen
+        # toggle (set_mode RPC -> apply_mode), which swaps the expressive preset.
         self._mode: str = "casual"
-        self._mood: str | None = None
         super().__init__(
             # Direct OpenAI (own API key). gpt-5.4-mini follows the expressive markup
-            # well and is fast/reliable with the set_style tool. Model env-overridable.
+            # well and is fast/reliable. Model env-overridable.
             llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini")),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent
-            # `expressive` overrides the session; set_style mutates it via
-            # update_expressive so register/mood changes take effect next turn.
-            expressive=_expressive_for(self._mode, self._mood),
+            # `expressive` overrides the session; apply_mode mutates it via
+            # update_expressive so a register change takes effect next turn.
+            expressive=_expressive_for(self._mode),
         )
+        # Cheap, separate LLM that reads each spoken line and classifies the mood it
+        # conveys for the on-screen ring. Independent of the conversation LLM/prompt.
+        self._mood_client = AsyncOpenAI()
+        self._mood_task: asyncio.Task[None] | None = None
         self._cloned_voice_id: str | None = None
         self._cloned: bool = False
         self._job_ctx: JobContext | None = None
@@ -605,63 +622,86 @@ class Assistant(Agent):
         self._reading_script = False
         self._safe_generate_reply(session, CLONE_REVEAL_GREETING)
 
-    @function_tool
-    async def set_style(
-        self,
-        context: RunContext,
-        mode: Literal["professional", "casual"] | None = None,
-        mood: str | None = None,
-        color: Literal["gray", "amber", "green", "blue", "violet"] | None = None,
-    ) -> str:
-        """Change how you speak, on the user's request, and update the on-screen mood indicator.
+    async def apply_mode(self, session: AgentSession, mode: str) -> None:
+        """Switch the speaking register, driven by the user's on-screen toggle.
 
-        Call this whenever the user asks you to switch register or take on a mood or emotion.
-        Showing off this expressive range is the main point of the demo.
-
-        Args:
-            mode: "professional" (composed, customer-service register) or "casual" (relaxed,
-                playful, disfluent). Omit to keep the current register.
-            mood: a short word for the emotion to perform in (e.g. "excited", "sleepy",
-                "calm", "playful"). ONLY set this when the user explicitly asks for a mood or
-                emotion. When they just switch register (e.g. "go casual"), OMIT mood entirely
-                — do NOT invent one (especially not "calm", which flattens the casual energy);
-                leave it neutral so the register's own personality comes through. Pass an empty
-                string to clear a previously set mood.
-            color: the mood-ring color that best matches the mood, for the on-screen
-                indicator — gray = stressed/tense/anxious; amber = nervous/unsettled/unsure;
-                green = calm/relaxed/balanced; blue = happy/active/at ease; violet =
-                passionate/excited/playful. Pick the closest. Omit when only changing mode.
-
-        After this returns, give one short line in the new style so the user can hear the change.
+        Swaps the agent's expressive preset (the framework re-resolves it on the next
+        reply), echoes the new register to the frontend via `style.mode`, and — unless
+        we're mid clone-read — fires a short demo line so the user immediately hears the
+        new voice. Idempotent: a redundant switch still re-asserts the preset and attr.
         """
-        if mode is not None:
-            self._mode = mode
-        if mood is not None:
-            self._mood = mood.strip() or None
-        # Swap the expressive preset (+ mood overlay). The framework re-resolves
-        # the agent's expressive options on the next reply, so the new register/mood
-        # lands on the "one short line in the new style" the directive below triggers.
-        self.update_expressive(_expressive_for(self._mode, self._mood))
+        if mode not in _PRESET_FOR_MODE:
+            logger.warning("ignoring unknown mode: %r", mode)
+            return
+        changed = mode != self._mode
+        self._mode = mode
+        self.update_expressive(_expressive_for(mode))
+        await self._set_style_attrs(mode=mode)
+        logger.info("mode switched -> %s", mode)
+        if changed and not self._reading_script:
+            self._safe_generate_reply(
+                session,
+                f"The user just switched you to {mode} mode using the on-screen toggle. "
+                f"In ONE short, natural line, react and let them hear your {mode} voice, "
+                "then carry the conversation on.",
+            )
 
-        # Fall back to the mode's resting color when the mood (and thus an explicit
-        # color) was cleared, so the indicator never goes stale.
-        if self._mood is None:
-            color = DEFAULT_MODE_COLOR[self._mode]
-        elif color is None:
-            color = "green"
-        await self._set_style_attrs(mode=self._mode, mood=self._mood or "", color=color)
-        logger.info(
-            "style updated: mode=%s mood=%s color=%s", self._mode, self._mood, color
-        )
+    async def _mood_tee(self, text: AsyncIterable[str]) -> AsyncIterable[str]:
+        """Forward the TTS text stream unchanged, then kick off the cosmetic mood
+        classification once the text finishes streaming. That happens when the LLM has
+        finished producing the line — much earlier than `conversation_item_added`,
+        which only lands after audio playout ends — so the ring updates as the agent
+        starts speaking, not after it stops."""
+        buf: list[str] = []
+        async for chunk in text:
+            buf.append(chunk)
+            yield chunk
+        self._schedule_mood("".join(buf))
 
-        descriptor = f"{self._mode} mode"
-        if self._mood:
-            descriptor += f" with a {self._mood} mood"
-        return (
-            f"You're now in {descriptor}. Now SPEAK one short line in this new style so the "
-            "user can hear the difference, then carry on. Do NOT call set_style again for this "
-            "request — it's already applied; only call it again when the user asks for a new change."
-        )
+    def _schedule_mood(self, raw_text: str) -> None:
+        """(Re)launch mood classification for a freshly spoken line. Only the latest
+        line matters, so any still-running classification is cancelled. No-ops during
+        the clone-script read."""
+        if self._reading_script:
+            return
+        text = _MARKUP_RE.sub("", raw_text or "").strip()
+        if not text:
+            return
+        if self._mood_task is not None and not self._mood_task.done():
+            self._mood_task.cancel()
+        self._mood_task = asyncio.create_task(self._classify_mood(text))
+        self._bg_tasks.add(self._mood_task)
+        self._mood_task.add_done_callback(self._bg_tasks.discard)
+
+    async def _classify_mood(self, text: str) -> None:
+        """Ask the cheap mood LLM what emotion `text` conveys and push the result to
+        the on-screen ring (`style.mood`/`style.color`). Best-effort and isolated:
+        failures are logged, never surfaced, and never touch the agent's delivery."""
+        try:
+            resp = await self._mood_client.chat.completions.create(
+                model=MOOD_MODEL,
+                messages=[
+                    {"role": "system", "content": _MOOD_SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=24,
+                temperature=0,
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("mood classification failed")
+            return
+        mood = str(data.get("mood", "")).strip().lower()[:24]
+        color = str(data.get("color", "")).strip().lower()
+        if color not in _RING_COLORS:
+            color = DEFAULT_MODE_COLOR.get(self._mode, "green")
+        if not mood:
+            return
+        logger.info("mood ring: mood=%s color=%s", mood, color)
+        await self._set_style_attrs(mood=mood, color=color)
 
     def llm_node(self, chat_ctx, tools, model_settings):
         # Log the full per-turn prompt (instructions + injected expressive guidance +
@@ -678,6 +718,10 @@ class Assistant(Agent):
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     def tts_node(self, text, model_settings):
+        # Tee the raw text (pre-phoneme, with markup intact) to drive the mood ring as
+        # early as possible — classification fires the moment the line finishes
+        # streaming from the LLM, not after playout.
+        text = self._mood_tee(text)
         # Fix the "LiveKit" pronunciation in the audio only (transcript is unaffected).
         stream = _fix_tts_pronunciation(text, LIVEKIT_PHONEME)
         if _LOG_TTS_PAYLOAD:
@@ -785,6 +829,19 @@ async def my_agent(ctx: JobContext):
     # (session.start has already moved it to "listening").
     assistant._agent_state = session.agent_state
     session.on("agent_state_changed", assistant._on_agent_state_changed)
+
+    # (The cosmetic mood ring is driven from `tts_node` via `_mood_tee`, so it updates
+    # as the agent starts speaking rather than after the turn is committed.)
+
+    # Register switching is user-driven: the frontend toggle calls this RPC, which
+    # swaps the expressive preset and triggers a short demo line in the new register.
+    @ctx.room.local_participant.register_rpc_method("set_mode")
+    async def _handle_set_mode(data) -> str:
+        mode = (data.payload or "").strip().lower()
+        if mode not in _PRESET_FOR_MODE:
+            return json.dumps({"ok": False, "error": f"unknown mode {mode!r}"})
+        await assistant.apply_mode(session, mode)
+        return json.dumps({"ok": True, "mode": mode})
 
     # Seed the mood-ring indicator with the resting starting-mode state (both paths).
     await assistant._set_style_attrs(

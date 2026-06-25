@@ -58,12 +58,18 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 
 
 def system_prompt(mode: str, mood: str | None) -> str:
+    # Mood no longer feeds the prompt (it's a cosmetic, separately-classified UI signal
+    # now); the CLI still accepts a mood arg, but it only affects the report label.
     opts = presets.resolve_options(
-        agent._expressive_for(mode, mood),
+        agent._expressive_for(mode),
         provider_key="fishaudio",
         default=next(iter(presets._REGISTRY["fishaudio"].values())),
     )
-    return agent.CORE_INSTRUCTIONS.strip() + "\n\n" + str(opts["tts_instructions_template"])
+    return (
+        agent.CORE_INSTRUCTIONS.strip()
+        + "\n\n"
+        + str(opts["tts_instructions_template"])
+    )
 
 
 def tag_counts(text: str) -> str:
@@ -89,7 +95,10 @@ def main() -> None:
     # Markdown report (path overridable via MD_OUT; default sits next to this script).
     md_path = os.getenv(
         "MD_OUT",
-        os.path.join(os.path.dirname(__file__), f"prompt_report_{mode}{'_' + mood if mood else ''}.md"),
+        os.path.join(
+            os.path.dirname(__file__),
+            f"prompt_report_{mode}{'_' + mood if mood else ''}.md",
+        ),
     )
     md: list[str] = [
         f"# Prompt test — {mode}" + (f" · mood: {mood}" if mood else ""),

@@ -16,10 +16,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from dotenv import load_dotenv
+from livekit.agents.voice import presets
 from openai import OpenAI
 
 import src.agent as agent
-from livekit.agents.voice import presets
 
 load_dotenv(".env.local")
 
@@ -35,13 +35,17 @@ client = OpenAI()
 
 
 def system_prompt(mode: str) -> str:
-    ex = agent._expressive_for(mode, None)
+    ex = agent._expressive_for(mode)
     opts = presets.resolve_options(
         ex,
         provider_key="fishaudio",
-        default=list(presets._REGISTRY["fishaudio"].values())[0],
+        default=next(iter(presets._REGISTRY["fishaudio"].values())),
     )
-    return agent.CORE_INSTRUCTIONS.strip() + "\n\n" + str(opts["tts_instructions_template"])
+    return (
+        agent.CORE_INSTRUCTIONS.strip()
+        + "\n\n"
+        + str(opts["tts_instructions_template"])
+    )
 
 
 def analyze(text: str) -> dict:
@@ -51,7 +55,9 @@ def analyze(text: str) -> dict:
         "break": len(re.findall(r"<break\b", text)),
         "emphasis": len(re.findall(r"<emphasis\b", text)),
         "stray_brackets": len(re.findall(r"\[[^\]]+\]", text)),
-        "malformed_lt": len(re.findall(r"<(?!/?(expression|sound|break|emphasis)\b)", text)),
+        "malformed_lt": len(
+            re.findall(r"<(?!/?(expression|sound|break|emphasis)\b)", text)
+        ),
     }
 
 
@@ -70,7 +76,7 @@ for model in MODELS:
                     ],
                 )
                 out = (resp.choices[0].message.content or "").strip()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 print(f"  [ERROR calling {model}]: {e}")
                 break
             a = analyze(out)

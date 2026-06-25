@@ -1,18 +1,10 @@
 'use client';
 
-import { type ComponentProps, useEffect, useRef, useState } from 'react';
+import { type ComponentProps } from 'react';
 import { Track } from 'livekit-client';
-import { Loader, MessageSquareTextIcon, SendHorizontal } from 'lucide-react';
-import { type MotionProps, motion } from 'motion/react';
-import { useChat } from '@livekit/components-react';
 import { AgentDisconnectButton } from '@/components/agents-ui/agent-disconnect-button';
 import { AgentTrackControl } from '@/components/agents-ui/agent-track-control';
-import {
-  AgentTrackToggle,
-  agentTrackToggleVariants,
-} from '@/components/agents-ui/agent-track-toggle';
-import { Button } from '@/components/ui/button';
-import { Toggle } from '@/components/ui/toggle';
+import { AgentTrackToggle } from '@/components/agents-ui/agent-track-toggle';
 import {
   type UseInputControlsProps,
   useInputControls,
@@ -41,131 +33,22 @@ const LK_TOGGLE_VARIANT_2 = [
   'dark:data-[state=on]:bg-blue-500/20 dark:data-[state=on]:text-blue-300',
 ];
 
-const MOTION_PROPS: MotionProps = {
-  variants: {
-    hidden: {
-      height: 0,
-      opacity: 0,
-      marginBottom: 0,
-    },
-    visible: {
-      height: 'auto',
-      opacity: 1,
-      marginBottom: 12,
-    },
-  },
-  initial: 'hidden',
-  transition: {
-    duration: 0.3,
-    ease: 'easeOut',
-  },
-};
-
-interface AgentChatInputProps {
-  chatOpen: boolean;
-  onSend?: (message: string) => void;
-  className?: string;
-}
-
-function AgentChatInput({ chatOpen, onSend = async () => {}, className }: AgentChatInputProps) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [isSending, setIsSending] = useState(false);
-  const [message, setMessage] = useState<string>('');
-  const isDisabled = isSending || message.trim().length === 0;
-
-  const handleSend = async () => {
-    if (isDisabled) {
-      return;
-    }
-
-    try {
-      setIsSending(true);
-      await onSend(message.trim());
-      setMessage('');
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const handleKeyDown = async (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleButtonClick = async () => {
-    if (isDisabled) return;
-    await handleSend();
-  };
-
-  useEffect(() => {
-    if (chatOpen) return;
-    // when not disabled refocus on input
-    inputRef.current?.focus();
-  }, [chatOpen]);
-
-  return (
-    <div className={cn('mb-3 flex grow items-end gap-2 rounded-md pl-1 text-sm', className)}>
-      <textarea
-        autoFocus
-        ref={inputRef}
-        value={message}
-        disabled={!chatOpen || isSending}
-        placeholder="Type something..."
-        onKeyDown={handleKeyDown}
-        onChange={(e) => setMessage(e.target.value)}
-        className="field-sizing-content max-h-16 min-h-8 flex-1 resize-none py-2 [scrollbar-width:thin] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-      />
-      <Button
-        size="icon"
-        type="button"
-        disabled={isDisabled}
-        variant={isDisabled ? 'secondary' : 'default'}
-        title={isSending ? 'Sending...' : 'Send'}
-        onClick={handleButtonClick}
-        className="self-end disabled:cursor-not-allowed"
-      >
-        {isSending ? <Loader className="animate-spin" /> : <SendHorizontal />}
-      </Button>
-    </div>
-  );
-}
-
-/** Configuration for which controls to display in the AgentControlBar. */
+/**
+ * Configuration for which controls to display in the AgentControlBar.
+ *
+ * This demo is voice-only — the text-chat input and its toggle have been removed in
+ * favor of the mode toggle + mood/state display (see `agent-session-block.tsx`). The
+ * `chat` control no longer exists here.
+ */
 export interface AgentControlBarControls {
-  /**
-   * Whether to show the leave/disconnect button.
-   *
-   * @defaultValue true
-   */
+  /** Show the leave/disconnect button. @defaultValue true */
   leave?: boolean;
-  /**
-   * Whether to show the camera toggle control.
-   *
-   * @defaultValue true (if camera publish permission is granted)
-   */
+  /** Show the camera toggle. @defaultValue true (if camera publish permission granted) */
   camera?: boolean;
-  /**
-   * Whether to show the microphone toggle control.
-   *
-   * @defaultValue true (if microphone publish permission is granted)
-   */
+  /** Show the microphone toggle. @defaultValue true (if microphone publish permission granted) */
   microphone?: boolean;
-  /**
-   * Whether to show the screen share toggle control.
-   *
-   * @defaultValue true (if screen share publish permission is granted)
-   */
+  /** Show the screen share toggle. @defaultValue true (if screen share publish permission granted) */
   screenShare?: boolean;
-  /**
-   * Whether to show the chat toggle control.
-   *
-   * @defaultValue true (if data publish permission is granted)
-   */
-  chat?: boolean;
 }
 
 export interface AgentControlBarProps extends UseInputControlsProps {
@@ -176,17 +59,7 @@ export interface AgentControlBarProps extends UseInputControlsProps {
    */
   variant?: 'default' | 'outline' | 'livekit';
   /**
-   * This takes an object with the following keys: `leave`, `microphone`, `screenShare`, `camera`,
-   * `chat`. Each key maps to a boolean value that determines whether the control is displayed.
-   *
-   * @default
-   * {
-   *   leave: true,
-   *   microphone: true,
-   *   screenShare: true,
-   *   camera: true,
-   *   chat: true,
-   * }
+   * Per-control visibility. Keys: `leave`, `microphone`, `screenShare`, `camera`.
    */
   controls?: AgentControlBarControls;
   /**
@@ -201,59 +74,27 @@ export interface AgentControlBarProps extends UseInputControlsProps {
    * @default false
    */
   isConnected?: boolean;
-  /**
-   * Whether the chat input interface is open.
-   *
-   * @default false
-   */
-  isChatOpen?: boolean;
   /** The callback for when the user disconnects. */
   onDisconnect?: () => void;
-  /** The callback for when the chat is opened or closed. */
-  onIsChatOpenChange?: (open: boolean) => void;
   /** The callback for when a device error occurs. */
   onDeviceError?: (error: { source: Track.Source; error: Error }) => void;
 }
 
 /**
- * A control bar specifically designed for voice assistant interfaces. Provides controls for
- * microphone, camera, screen share, chat, and disconnect. Includes an expandable chat input for
- * text-based interaction with the agent.
- *
- * @example
- *
- * ```tsx
- * <AgentControlBar
- *   variant="livekit"
- *   isConnected={true}
- *   onDisconnect={() => handleDisconnect()}
- *   controls={{
- *     microphone: true,
- *     camera: true,
- *     screenShare: false,
- *     chat: true,
- *     leave: true,
- *   }}
- * />;
- * ```
- *
- * @extends ComponentProps<'div'>
+ * A control bar for the voice assistant interface: microphone, camera, screen share,
+ * and disconnect. Text chat has been removed for this demo (voice-only).
  */
 export function AgentControlBar({
   variant = 'default',
   controls,
-  isChatOpen = false,
   isConnected = false,
   saveUserChoices = true,
   onDisconnect,
   onDeviceError,
-  onIsChatOpenChange,
   className,
   ...props
 }: AgentControlBarProps & ComponentProps<'div'>) {
-  const { send } = useChat();
   const publishPermissions = usePublishPermissions();
-  const [isChatOpenUncontrolled, setIsChatOpenUncontrolled] = useState(isChatOpen);
   const {
     microphoneTrack,
     cameraToggle,
@@ -265,16 +106,11 @@ export function AgentControlBar({
     handleCameraDeviceSelectError,
   } = useInputControls({ onDeviceError, saveUserChoices });
 
-  const handleSendMessage = async (message: string) => {
-    await send(message);
-  };
-
   const visibleControls = {
     leave: controls?.leave ?? true,
     microphone: controls?.microphone ?? publishPermissions.microphone,
     screenShare: controls?.screenShare ?? publishPermissions.screenShare,
     camera: controls?.camera ?? publishPermissions.camera,
-    chat: controls?.chat ?? publishPermissions.data,
   };
 
   const isEmpty = Object.values(visibleControls).every((value) => !value);
@@ -294,19 +130,6 @@ export function AgentControlBar({
       )}
       {...props}
     >
-      <motion.div
-        {...MOTION_PROPS}
-        inert={!(isChatOpen || isChatOpenUncontrolled)}
-        animate={isChatOpen || isChatOpenUncontrolled ? 'visible' : 'hidden'}
-        className="border-input/50 flex w-full items-start overflow-hidden border-b"
-      >
-        <AgentChatInput
-          chatOpen={isChatOpen || isChatOpenUncontrolled}
-          onSend={handleSendMessage}
-          className={cn(variant === 'livekit' && '[&_button]:rounded-full')}
-        />
-      </motion.div>
-
       <div className="flex gap-1">
         <div className="flex grow gap-1">
           {/* Toggle Microphone */}
@@ -364,25 +187,6 @@ export function AgentControlBar({
               onPressedChange={screenShareToggle.toggle}
               className={cn(variant === 'livekit' && [LK_TOGGLE_VARIANT_2, 'rounded-full'])}
             />
-          )}
-
-          {/* Toggle Transcript */}
-          {visibleControls.chat && (
-            <Toggle
-              variant={variant === 'outline' ? 'outline' : 'default'}
-              pressed={isChatOpen || isChatOpenUncontrolled}
-              aria-label="Toggle transcript"
-              onPressedChange={(state) => {
-                if (!onIsChatOpenChange) setIsChatOpenUncontrolled(state);
-                else onIsChatOpenChange(state);
-              }}
-              className={agentTrackToggleVariants({
-                variant: variant === 'outline' ? 'outline' : 'default',
-                className: cn(variant === 'livekit' && [LK_TOGGLE_VARIANT_2, 'rounded-full']),
-              })}
-            >
-              <MessageSquareTextIcon />
-            </Toggle>
           )}
         </div>
 

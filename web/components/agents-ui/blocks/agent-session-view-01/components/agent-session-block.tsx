@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AnimatePresence, type MotionProps, motion } from 'motion/react';
 import { useAgent, useSessionContext, useSessionMessages } from '@livekit/components-react';
 import { AgentChatTranscript } from '@/components/agents-ui/agent-chat-transcript';
@@ -10,6 +10,7 @@ import {
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { CloneScriptCard } from '@/components/app/clone-script-card';
+import { ModeToggle } from '@/components/app/mode-toggle';
 import { MoodIndicator } from '@/components/app/mood-indicator';
 import { cn } from '@/lib/shadcn/utils';
 
@@ -140,9 +141,8 @@ export interface AgentSessionView_01Props {
 
 export function AgentSessionView_01({
   preConnectMessage = 'Agent is listening, ask it a question',
-  supportsChatInput = true,
-  supportsVideoInput = true,
-  supportsScreenShare = true,
+  supportsVideoInput = false,
+  supportsScreenShare = false,
   isPreConnectBufferEnabled = true,
   ref,
   className,
@@ -150,14 +150,14 @@ export function AgentSessionView_01({
 }: React.ComponentProps<'section'> & AgentSessionView_01Props) {
   const session = useSessionContext();
   const { messages } = useSessionMessages(session);
-  const [chatOpen, setChatOpen] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { state: agentState } = useAgent();
 
+  // Voice-only: the text-chat input is gone, replaced by the mode toggle + mood/state
+  // display below. The bottom bar is just mic + end call (+ optional camera/share).
   const controls: AgentControlBarControls = {
     leave: true,
     microphone: true,
-    chat: supportsChatInput,
     camera: supportsVideoInput,
     screenShare: supportsScreenShare,
   };
@@ -186,21 +186,17 @@ export function AgentSessionView_01({
 
       {/* transcript */}
 
-      <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
-        <AnimatePresence>
-          {chatOpen && (
-            <motion.div
-              {...CHAT_MOTION_PROPS}
-              className="flex h-full w-full flex-col gap-4 space-y-3 transition-opacity duration-300 ease-out"
-            >
-              <AgentChatTranscript
-                agentState={agentState}
-                messages={messages}
-                className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 [&>div>div]:pb-28 md:[&>div>div]:px-6"
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <div className="absolute top-0 bottom-[180px] flex w-full flex-col md:bottom-[210px]">
+        <motion.div
+          {...CHAT_MOTION_PROPS}
+          className="flex h-full w-full flex-col gap-4 space-y-3 transition-opacity duration-300 ease-out"
+        >
+          <AgentChatTranscript
+            agentState={agentState}
+            messages={messages}
+            className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 [&>div>div]:pb-28 md:[&>div>div]:px-6"
+          />
+        </motion.div>
       </div>
       {/* Bottom */}
       <motion.div
@@ -225,14 +221,16 @@ export function AgentSessionView_01({
         )}
         <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
           <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
-          <MoodIndicator className="mb-2" />
+          {/* Custom voice UI: user-driven register toggle + cosmetic mood/state ring */}
+          <div className="mb-3 flex flex-col items-center gap-2">
+            <ModeToggle />
+            <MoodIndicator />
+          </div>
           <AgentControlBar
             variant="livekit"
             controls={controls}
-            isChatOpen={chatOpen}
             isConnected={session.isConnected}
             onDisconnect={session.end}
-            onIsChatOpenChange={setChatOpen}
           />
         </div>
       </motion.div>

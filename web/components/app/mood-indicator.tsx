@@ -2,13 +2,18 @@
 
 import type { RemoteParticipant } from 'livekit-client';
 import { AnimatePresence, motion } from 'motion/react';
-import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
+import {
+  type AgentState,
+  useParticipantAttribute,
+  useVoiceAssistant,
+} from '@livekit/components-react';
 import { cn } from '@/lib/shadcn/utils';
 
-// Mood-ring palette. The agent's set_style tool writes `style.color` as one of
-// these keys (picking the one that matches the mood it's performing in); we map
-// it to a glow color for the on-screen "mood ring". Classes are spelled out in
-// full so Tailwind keeps them in the build.
+// Mood-ring palette. A separate, cosmetic LLM in the agent process reads each line
+// the agent speaks, classifies the emotion it conveys, and writes `style.mood` (a
+// one-word feeling) + `style.color` (one of these keys). It never touches the agent's
+// delivery — it just drives this ring. Classes are spelled out in full so Tailwind
+// keeps them in the build.
 const RING_COLORS: Record<string, { dot: string; glow: string }> = {
   gray: { dot: 'bg-slate-400', glow: 'shadow-[0_0_12px_2px] shadow-slate-400/60' },
   amber: { dot: 'bg-amber-500', glow: 'shadow-[0_0_12px_2px] shadow-amber-500/60' },
@@ -17,38 +22,51 @@ const RING_COLORS: Record<string, { dot: string; glow: string }> = {
   violet: { dot: 'bg-violet-500', glow: 'shadow-[0_0_12px_2px] shadow-violet-500/60' },
 };
 
+// Live pipeline state → a short human label shown next to the mood while the agent
+// is actively doing something. When it's just listening we let the mood stand alone.
+const STATE_LABEL: Partial<Record<AgentState, string>> = {
+  thinking: 'thinking',
+  speaking: 'speaking',
+  initializing: 'connecting',
+  connecting: 'connecting',
+};
+
 interface MoodIndicatorProps {
   className?: string;
 }
 
 export function MoodIndicator({ className }: MoodIndicatorProps) {
-  const { agent } = useVoiceAssistant();
+  const { agent, state } = useVoiceAssistant();
   if (!agent) return null;
-  return <MoodIndicatorInner agent={agent} className={className} />;
+  return <MoodIndicatorInner agent={agent} state={state} className={className} />;
 }
 
 function MoodIndicatorInner({
   agent,
+  state,
   className,
 }: {
   agent: RemoteParticipant;
+  state: AgentState;
   className?: string;
 }) {
-  const mode = useParticipantAttribute('style.mode', { participant: agent });
   const mood = useParticipantAttribute('style.mood', { participant: agent });
   const rawColor = useParticipantAttribute('style.color', { participant: agent });
 
-  // Nothing published yet (e.g. mid-connect) — don't render a half-empty pill.
-  if (!mode) return null;
-
   const color = RING_COLORS[rawColor ?? ''] ?? RING_COLORS.green;
-  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
-  const label = mood ? `${modeLabel} · ${mood}` : modeLabel;
+  // Primary label = the classified mood once we have one; until then, the live state.
+  const moodLabel = mood ? mood.charAt(0).toUpperCase() + mood.slice(1) : null;
+  const stateLabel = STATE_LABEL[state];
+  const primary =
+    moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
+  // Show the state as a faded suffix only when it adds something the mood doesn't.
+  const suffix = moodLabel && stateLabel ? stateLabel : null;
+  const pulse = state === 'speaking' || state === 'thinking';
 
   return (
     <AnimatePresence mode="popLayout">
       <motion.div
-        key={label}
+        key={`${primary}-${suffix ?? ''}`}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -4 }}
@@ -58,11 +76,16 @@ function MoodIndicatorInner({
           className
         )}
       >
-        <span
-          className={cn('size-2 rounded-full transition-colors', color.dot, color.glow)}
+        <motion.span
+          className={cn('size-2 shrink-0 rounded-full', color.dot, color.glow)}
+          animate={pulse ? { scale: [1, 1.35, 1], opacity: [1, 0.7, 1] } : { scale: 1, opacity: 1 }}
+          transition={
+            pulse ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }
+          }
           aria-hidden="true"
         />
-        <span className="capitalize">{label}</span>
+        <span>{primary}</span>
+        {suffix && <span className="text-foreground/40">· {suffix}</span>}
       </motion.div>
     </AnimatePresence>
   );

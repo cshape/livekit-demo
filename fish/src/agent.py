@@ -22,7 +22,7 @@ from livekit.agents import (
     StopResponse,
     cli,
 )
-from livekit.agents.voice import presets
+from livekit.agents.voice import SpeechHandle, presets
 from livekit.plugins import assemblyai, fishaudio, openai, silero
 from openai import AsyncOpenAI
 
@@ -341,6 +341,9 @@ class Assistant(Agent):
         # Recent mood labels fed back into the classifier so it varies its word choice
         # turn to turn instead of getting stuck on one (e.g. "playful").
         self._recent_moods: list[str] = []
+        # Handle for the "hear the new register" demo line, so a rapid burst of toggles
+        # doesn't stack interrupting generate_reply calls (which flaps agent state).
+        self._mode_demo_handle: SpeechHandle | None = None
         self._cloned_voice_id: str | None = None
         self._cloned: bool = False
         self._job_ctx: JobContext | None = None
@@ -416,13 +419,17 @@ class Assistant(Agent):
         always re-assert the correct value."""
         self._agent_state = ev.new_state
 
-    def _safe_generate_reply(self, session: AgentSession, instructions: str) -> None:
+    def _safe_generate_reply(
+        self, session: AgentSession, instructions: str
+    ) -> SpeechHandle | None:
         """generate_reply that no-ops if the session already closed (e.g. the user
-        disconnected mid clone-first flow) instead of crashing the job task."""
+        disconnected mid clone-first flow) instead of crashing the job task. Returns the
+        SpeechHandle so callers can track whether the reply is still in flight."""
         try:
-            session.generate_reply(instructions=instructions)
+            return session.generate_reply(instructions=instructions)
         except RuntimeError:
-            logger.info("session no longer running; skipping queued greeting")
+            logger.info("session no longer running; skipping queued reply")
+            return None
 
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
@@ -648,6 +655,12 @@ class Assistant(Agent):
         reply), echoes the new register to the frontend via `style.mode`, and — unless
         we're mid clone-read — fires a short demo line so the user immediately hears the
         new voice. Idempotent: a redundant switch still re-asserts the preset and attr.
+
+        The preset swap is always applied immediately, but the spoken demo is SKIPPED
+        while a previous switch's demo is still in flight. That keeps a rapid burst of
+        toggles from stacking interrupting generate_reply calls (which flaps the agent
+        state fast enough to trip the SDK's agent-health check); the latest register is
+        still active for the next real turn, and a demo plays once the user settles.
         """
         if mode not in _PRESET_FOR_MODE:
             logger.warning("ignoring unknown mode: %r", mode)
@@ -657,13 +670,19 @@ class Assistant(Agent):
         self.update_expressive(_expressive_for(mode))
         await self._set_style_attrs(mode=mode)
         logger.info("mode switched -> %s", mode)
-        if changed and not self._reading_script:
-            self._safe_generate_reply(
-                session,
-                f"The user just switched you to {mode} mode using the on-screen toggle. "
-                f"In ONE short, natural line, react and let them hear your {mode} voice, "
-                "then carry the conversation on.",
+        if not changed or self._reading_script:
+            return
+        if self._mode_demo_handle is not None and not self._mode_demo_handle.done():
+            logger.info(
+                "prior mode demo still in flight; applying preset without a new demo line"
             )
+            return
+        self._mode_demo_handle = self._safe_generate_reply(
+            session,
+            f"The user just switched you to {mode} mode using the on-screen toggle. "
+            f"In ONE short, natural line, react and let them hear your {mode} voice, "
+            "then carry the conversation on.",
+        )
 
     async def _mood_tee(self, text: AsyncIterable[str]) -> AsyncIterable[str]:
         """Forward the TTS text stream unchanged, then kick off the cosmetic mood

@@ -256,8 +256,11 @@ _MOOD_SYSTEM_PROMPT = (
     "assistant just spoke. Judge the EMOTION its delivery conveys and reply with ONLY a "
     "compact JSON object, no prose, no markdown:\n"
     '{"mood": "<one lowercase word>", "color": "<gray|amber|green|blue|violet>"}\n'
-    "mood: a single vivid word for the feeling (e.g. cheerful, curious, playful, calm, "
-    "wistful, excited, tense, tender). color picks the closest ring: "
+    "mood: ONE vivid, specific word for the feeling. Aim for subtle variety turn to turn "
+    "and don't keep defaulting to the same generic word (e.g. 'playful' or 'happy'); reach "
+    "for a fresh, precise shade instead (cheerful, curious, tickled, breezy, wistful, "
+    "earnest, mischievous, wry, tender, buoyant, wistful, chuffed, gleeful, ...). Get "
+    "creative as long as the word genuinely fits the line. color picks the closest ring: "
     "gray=tense/stressed/flat, amber=unsure/hesitant/nervous, green=calm/warm/balanced, "
     "blue=happy/upbeat/at-ease, violet=excited/playful/passionate."
 )
@@ -333,6 +336,9 @@ class Assistant(Agent):
         # conveys for the on-screen ring. Independent of the conversation LLM/prompt.
         self._mood_client = AsyncOpenAI()
         self._mood_task: asyncio.Task[None] | None = None
+        # Recent mood labels fed back into the classifier so it varies its word choice
+        # turn to turn instead of getting stuck on one (e.g. "playful").
+        self._recent_moods: list[str] = []
         self._cloned_voice_id: str | None = None
         self._cloned: bool = False
         self._job_ctx: JobContext | None = None
@@ -673,18 +679,27 @@ class Assistant(Agent):
 
     async def _classify_mood(self, text: str) -> None:
         """Ask the cheap mood LLM what emotion `text` conveys and push the result to
-        the on-screen ring (`style.mood`/`style.color`). Best-effort and isolated:
-        failures are logged, never surfaced, and never touch the agent's delivery."""
+        the on-screen ring (`style.mood`/`style.color`). Feeds the recent labels back in
+        and runs warm so the word shifts subtly each turn instead of sticking on one.
+        Best-effort and isolated: failures are logged, never surfaced, and never touch
+        the agent's delivery."""
+        user_content = text
+        if self._recent_moods:
+            user_content += (
+                "\n\n[Recent mood words already used (most recent last): "
+                f"{', '.join(self._recent_moods)}. Do NOT reuse any of these; pick a "
+                "different, fresh word that still genuinely fits this line.]"
+            )
         try:
             resp = await self._mood_client.chat.completions.create(
                 model=MOOD_MODEL,
                 messages=[
                     {"role": "system", "content": _MOOD_SYSTEM_PROMPT},
-                    {"role": "user", "content": text},
+                    {"role": "user", "content": user_content},
                 ],
                 response_format={"type": "json_object"},
                 max_tokens=24,
-                temperature=0,
+                temperature=0.9,
             )
             data = json.loads(resp.choices[0].message.content or "{}")
         except asyncio.CancelledError:
@@ -698,6 +713,9 @@ class Assistant(Agent):
             color = DEFAULT_MODE_COLOR.get(self._mode, "green")
         if not mood:
             return
+        # Remember the last few labels so the next turn avoids repeating them.
+        self._recent_moods.append(mood)
+        self._recent_moods = self._recent_moods[-5:]
         logger.info("mood ring: mood=%s color=%s", mood, color)
         await self._set_style_attrs(mood=mood, color=color)
 

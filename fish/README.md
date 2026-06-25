@@ -2,10 +2,12 @@
 
 The backend half of the [expressive voice agent demo](../README.md): a Python
 [LiveKit Agents](https://docs.livekit.io/agents/) worker that speaks with
-[Fish Audio](https://fish.audio)'s expressive TTS. It can switch register
-(professional/casual) and mood at runtime via a `set_style` tool, starts in a
-caller-selected preset voice, and — if the caller picks "clone your voice" —
-clones them from a short scripted read before the conversation begins.
+[Fish Audio](https://fish.audio)'s expressive TTS. The user flips its register
+(casual/professional) at runtime via an on-screen toggle (a `set_mode` RPC swaps
+the SDK expressive preset), while a separate cosmetic LLM drives an on-screen mood
+ring. It starts in a caller-selected preset voice, and — if the caller picks
+"clone your voice" — clones them from a short scripted read before the
+conversation begins.
 
 This directory is self-contained — you can run it on its own and point any
 [compatible frontend](https://docs.livekit.io/frontends/) (or the
@@ -14,7 +16,7 @@ This directory is self-contained — you can run it on its own and point any
 ## Stack
 
 - **STT** — AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM** — OpenAI `gpt-5.4-mini` (`livekit-plugins-openai`, your `OPENAI_API_KEY`); override the model with `OPENAI_MODEL`
+- **LLM** — OpenAI `gpt-5.1` (`livekit-plugins-openai`, your `OPENAI_API_KEY`); override the model with `OPENAI_MODEL`. A separate cosmetic mood classifier runs on `MOOD_MODEL` (default `gpt-4.1-mini`).
 - **TTS** — Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn detection** — Silero VAD only (no separate turn-detector model, to keep the worker footprint small)
 

@@ -6,7 +6,7 @@ import wave
 
 import aiohttp
 from livekit import rtc
-from livekit.agents import stt, vad
+from livekit.agents import vad
 from livekit.agents.voice.io import AudioInput
 
 logger = logging.getLogger("voice_clone")
@@ -22,7 +22,7 @@ class PassthroughCaptureAudioInput(AudioInput):
     after the cap are still forwarded to the pipeline but not appended, so a
     runaway-long session can't blow memory and the eventual upload is bounded."""
 
-    def __init__(self, source: AudioInput, max_secs: float = 60.0) -> None:
+    def __init__(self, source: AudioInput, max_secs: float = 30.0) -> None:
         super().__init__(label="voice-clone-passthrough", source=source)
         self.frames: list[rtc.AudioFrame] = []
         self.max_secs = max_secs
@@ -90,31 +90,6 @@ async def vad_trim_frames(
         return frames
 
     return speech_frames
-
-
-async def transcribe_frames(stt_model: stt.STT, frames: list[rtc.AudioFrame]) -> str:
-    """Stream the given frames through an STT instance and return the joined final transcript."""
-    stream = stt_model.stream()
-
-    async def push() -> None:
-        for f in frames:
-            stream.push_frame(f)
-        stream.end_input()
-
-    push_task = asyncio.create_task(push())
-
-    parts: list[str] = []
-    try:
-        async for ev in stream:
-            if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
-                for alt in ev.alternatives:
-                    if alt.text:
-                        parts.append(alt.text)
-    finally:
-        await push_task
-        await stream.aclose()
-
-    return " ".join(parts).strip()
 
 
 def frames_to_wav(frames: list[rtc.AudioFrame]) -> bytes:

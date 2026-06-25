@@ -54,7 +54,6 @@ export function ViewController({ appConfig, selection, onSelectionChange }: View
         <MotionSessionView
           key="session-view"
           {...VIEW_MOTION_PROPS}
-          supportsChatInput={appConfig.supportsChatInput}
           supportsVideoInput={appConfig.supportsVideoInput}
           supportsScreenShare={appConfig.supportsScreenShare}
           isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}

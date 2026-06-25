@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { RoomEvent, TokenSource } from 'livekit-client';
-import { useRoomContext, useSession } from '@livekit/components-react';
+import { useMemo, useState } from 'react';
+import { TokenSource } from 'livekit-client';
+import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import { type AppConfig, CLONE_SELECTION, DEFAULT_VOICE_ID } from '@/app-config';
 import { AgentSessionProvider } from '@/components/agents-ui/agent-session-provider';
@@ -15,24 +15,6 @@ import { getSandboxTokenSource } from '@/lib/utils';
 
 function AppSetup() {
   useAgentErrors();
-
-  // Log why the room ever disconnects/reconnects, so a "crash mid-convo" shows its
-  // client-side reason in the console (network/signal drop vs a client-initiated end).
-  const room = useRoomContext();
-  useEffect(() => {
-    const onDisconnected = (reason?: unknown) =>
-      console.warn('[room] disconnected, reason=', reason);
-    const onReconnecting = () => console.warn('[room] reconnecting…');
-    const onReconnected = () => console.warn('[room] reconnected');
-    room.on(RoomEvent.Disconnected, onDisconnected);
-    room.on(RoomEvent.Reconnecting, onReconnecting);
-    room.on(RoomEvent.Reconnected, onReconnected);
-    return () => {
-      room.off(RoomEvent.Disconnected, onDisconnected);
-      room.off(RoomEvent.Reconnecting, onReconnecting);
-      room.off(RoomEvent.Reconnected, onReconnected);
-    };
-  }, [room]);
 
   return null;
 }

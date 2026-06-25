@@ -22,7 +22,7 @@ from livekit.agents import (
     StopResponse,
     cli,
 )
-from livekit.agents.voice import SpeechHandle, presets
+from livekit.agents.voice import presets
 from livekit.plugins import assemblyai, fishaudio, openai, silero
 from openai import AsyncOpenAI
 
@@ -132,10 +132,12 @@ async def _fix_tts_pronunciation(
         yield _LIVEKIT_RE.sub(replacement, buf)
 
 
-# Debug logging toggles (set to 0 to silence). LOG_TTS_PAYLOAD logs the per-utterance
-# text Fish synthesizes; LOG_LLM_PROMPT logs the full per-turn LLM prompt.
-_LOG_TTS_PAYLOAD = os.getenv("LOG_TTS_PAYLOAD", "1") != "0"
-_LOG_LLM_PROMPT = os.getenv("LOG_LLM_PROMPT", "1") != "0"
+# Opt-in debug logging (off by default; set the env var to 1 to enable). LOG_TTS_PAYLOAD
+# logs the per-utterance text Fish synthesizes; LOG_LLM_PROMPT logs the full per-turn LLM
+# prompt — handy for tuning the expressive prompts, but too verbose (and prompt-leaking)
+# to ship on by default.
+_LOG_TTS_PAYLOAD = os.getenv("LOG_TTS_PAYLOAD", "0") != "0"
+_LOG_LLM_PROMPT = os.getenv("LOG_LLM_PROMPT", "0") != "0"
 
 
 async def _log_tts_payload(text: AsyncIterable[str]) -> AsyncIterable[str]:
@@ -416,17 +418,13 @@ class Assistant(Agent):
         always re-assert the correct value."""
         self._agent_state = ev.new_state
 
-    def _safe_generate_reply(
-        self, session: AgentSession, instructions: str
-    ) -> SpeechHandle | None:
+    def _safe_generate_reply(self, session: AgentSession, instructions: str) -> None:
         """generate_reply that no-ops if the session already closed (e.g. the user
-        disconnected mid clone-first flow) instead of crashing the job task. Returns the
-        SpeechHandle so callers can track whether the reply is still in flight."""
+        disconnected mid clone-first flow) instead of crashing the job task."""
         try:
-            return session.generate_reply(instructions=instructions)
+            session.generate_reply(instructions=instructions)
         except RuntimeError:
             logger.info("session no longer running; skipping queued reply")
-            return None
 
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
@@ -878,9 +876,8 @@ async def my_agent(ctx: JobContext):
     assistant._agent_state = session.agent_state
     session.on("agent_state_changed", assistant._on_agent_state_changed)
 
-    # Diagnostics for the "crash mid-convo": log connection churn and, crucially, the
-    # REASON a participant or the room disconnected, so we can tell a client-initiated
-    # teardown (our code / a UI unmount) from a network/signal drop.
+    # Log connection churn and the REASON a participant or the room disconnected — useful
+    # ops visibility (tells a client-initiated teardown from a network/signal drop).
     def _reason_name(r: object) -> str:
         try:
             from livekit import rtc as _rtc

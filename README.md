@@ -2,8 +2,8 @@
 
 A small voice agent that shows off [Fish Audio](https://fish.audio)'s
 **expressive** text-to-speech. Pick one of four preset voices (or clone your own
-by reading a short script), then ask the agent to switch register
-(professional ↔ casual) or take on a mood, and hear the emotional range. Powered
+by reading a short script), then flip it between casual and professional mid-call
+with an on-screen toggle and watch its mood shift in real time. Powered
 by [Fish Audio](https://fish.audio), [AssemblyAI](https://www.assemblyai.com),
 [OpenAI](https://openai.com), and
 [LiveKit Agents](https://docs.livekit.io/agents/).
@@ -80,11 +80,13 @@ that provisions both services from a single click — no Docker needed.
   voices (with audio previews) or "clone your voice." That choice rides agent
   metadata to the worker via named dispatch, so the agent starts in the chosen
   voice.
-- **Expressive by default.** The agent opens in a professional register; ask it
-  to get casual or take on a mood and it calls a `set_style` tool that rewrites
-  its own prompt at runtime and updates an on-screen mood-ring indicator.
-  Delivery is shaped with Fish Audio's bracket markers (`[excited]`, `[calm]`,
-  `[chuckles]`, …), which are stripped from the transcript.
+- **Expressive by default.** The agent opens in a casual register. You flip it
+  between casual and professional with an on-screen toggle, which sends a
+  `set_mode` RPC that swaps the agent's expressive preset at runtime and has it
+  react in the new voice. A separate, lightweight LLM reads each line the agent
+  speaks and drives the on-screen mood ring (cosmetic — it never changes how the
+  agent talks). Delivery is shaped with the SDK's expressive markup, converted to
+  Fish Audio's native form for audio and stripped from the transcript.
 - **Clone-first (optional).** If you choose "clone your voice," the agent shows a
   short script and captures ~12 seconds as you read it (highlighting words live
   from streaming STT), clones your voice via Fish Audio's `/model` endpoint

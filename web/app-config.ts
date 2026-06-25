@@ -47,7 +47,6 @@ export interface AppConfig {
   pageDescription: string;
   companyName: string;
 
-  supportsChatInput: boolean;
   supportsVideoInput: boolean;
   supportsScreenShare: boolean;
   isPreConnectBufferEnabled: boolean;
@@ -69,9 +68,8 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   companyName: 'Fish Audio',
   pageTitle: 'Talk to an expressive voice agent — powered by Fish Audio',
   pageDescription:
-    "Chat with a LiveKit voice agent running Fish Audio's expressive TTS. Ask it to switch register or take on a mood — happy, calm, excited, playful — and hear the difference. You can also clone your own voice from ~10 seconds of the conversation; your recording and the clone are deleted when the call ends.",
+    "Talk to a LiveKit voice agent running Fish Audio's expressive TTS. Flip it between casual and professional mid-call and watch its mood shift in real time. You can also clone your own voice from a short scripted read; your recording and the clone are deleted when the call ends.",
 
-  supportsChatInput: false,
   supportsVideoInput: false,
   supportsScreenShare: false,
   isPreConnectBufferEnabled: false,

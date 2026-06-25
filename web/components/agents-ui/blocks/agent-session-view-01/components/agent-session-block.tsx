@@ -111,12 +111,6 @@ export interface AgentSessionView_01Props {
    */
   preConnectMessage?: string;
   /**
-   * Enables or disables the chat toggle and transcript input controls.
-   *
-   * @default true
-   */
-  supportsChatInput?: boolean;
-  /**
    * Enables or disables camera controls in the bottom control bar.
    *
    * @default true

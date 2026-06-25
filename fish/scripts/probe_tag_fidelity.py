@@ -6,7 +6,9 @@ agent's CORE instructions plus the active register's resolved Fish preset templa
 turns per (model, register) and reports the markup the model produced.
 
     uv run python scripts/probe_tag_fidelity.py
-    MODELS="gpt-5.4-nano,gpt-4.1-mini" uv run python scripts/probe_tag_fidelity.py
+    MODELS="gpt-5.1,gpt-4.1-mini" uv run python scripts/probe_tag_fidelity.py
+
+Dev-only tooling, not part of the demo runtime.
 """
 
 import os
@@ -23,7 +25,7 @@ import src.agent as agent
 
 load_dotenv(".env.local")
 
-MODELS = os.getenv("MODELS", "gpt-5.4-nano,gpt-4.1-mini").split(",")
+MODELS = os.getenv("MODELS", "gpt-5.1,gpt-4.1-mini").split(",")
 REGISTERS = ["professional", "casual"]
 USER_TURNS = [
     "hey! so what can you actually do?",

@@ -54,14 +54,32 @@ function MoodIndicatorInner({
   const rawColor = useParticipantAttribute('style.color', { participant: agent });
 
   const color = RING_COLORS[rawColor ?? ''] ?? RING_COLORS.green;
-  // Primary label = the classified mood once we have one; until then, the live state.
   const moodLabel = mood ? mood.charAt(0).toUpperCase() + mood.slice(1) : null;
-  const stateLabel = STATE_LABEL[state];
-  const primary =
-    moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
-  // Show the state as a faded suffix only when it adds something the mood doesn't.
-  const suffix = moodLabel && stateLabel ? stateLabel : null;
-  const pulse = state === 'speaking' || state === 'thinking';
+
+  // While the agent is `listening` (the window the user is speaking, until it flips
+  // to `thinking`), show a dedicated "Listening" state instead of the last mood — so
+  // the pill reflects that it's hearing you. Otherwise show the classified mood, with
+  // the live state as a faded suffix while thinking/speaking; before any mood lands,
+  // fall back to the state word.
+  let primary: string;
+  let suffix: string | null;
+  if (state === 'listening') {
+    primary = 'Listening';
+    suffix = null;
+  } else {
+    const stateLabel = STATE_LABEL[state];
+    primary =
+      moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening');
+    suffix = moodLabel && stateLabel ? stateLabel : null;
+  }
+
+  // Pulse while actively engaged. Listening gets a softer, slower pulse than the
+  // thinking/speaking beat so the two read differently at a glance.
+  const isListening = state === 'listening';
+  const pulse = isListening || state === 'speaking' || state === 'thinking';
+  const pulseScale = isListening ? [1, 1.2, 1] : [1, 1.35, 1];
+  const pulseOpacity = isListening ? [0.9, 0.5, 0.9] : [1, 0.7, 1];
+  const pulseDuration = isListening ? 1.6 : 1.1;
 
   return (
     <AnimatePresence mode="popLayout">
@@ -78,9 +96,11 @@ function MoodIndicatorInner({
       >
         <motion.span
           className={cn('size-2 shrink-0 rounded-full', color.dot, color.glow)}
-          animate={pulse ? { scale: [1, 1.35, 1], opacity: [1, 0.7, 1] } : { scale: 1, opacity: 1 }}
+          animate={pulse ? { scale: pulseScale, opacity: pulseOpacity } : { scale: 1, opacity: 1 }}
           transition={
-            pulse ? { duration: 1.1, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }
+            pulse
+              ? { duration: pulseDuration, repeat: Infinity, ease: 'easeInOut' }
+              : { duration: 0.2 }
           }
           aria-hidden="true"
         />

@@ -864,20 +864,33 @@ async def my_agent(ctx: JobContext):
     assistant._agent_state = session.agent_state
     session.on("agent_state_changed", assistant._on_agent_state_changed)
 
-    # Diagnostics: the "crash mid-utterance" is the frontend reacting to the AGENT
-    # participant briefly leaving the room. Log the agent's own RTC connection blips and
-    # any participant churn so the next occurrence is provable from the worker logs.
+    # Diagnostics for the "crash mid-convo": log connection churn and, crucially, the
+    # REASON a participant or the room disconnected, so we can tell a client-initiated
+    # teardown (our code / a UI unmount) from a network/signal drop.
+    def _reason_name(r: object) -> str:
+        try:
+            from livekit import rtc as _rtc
+
+            return f"{_rtc.DisconnectReason.Name(r)}({r})"
+        except Exception:
+            return str(r)
+
     ctx.room.on(
         "reconnecting", lambda: logger.warning("room RECONNECTING (agent-side blip)")
     )
     ctx.room.on("reconnected", lambda: logger.info("room reconnected"))
     ctx.room.on(
-        "disconnected", lambda *a: logger.warning("room DISCONNECTED: %s", a or "")
+        "disconnected",
+        lambda *a: logger.warning(
+            "room DISCONNECTED reason=%s", _reason_name(a[0]) if a else "?"
+        ),
     )
     ctx.room.on(
         "participant_disconnected",
         lambda p: logger.info(
-            "participant disconnected: %s", getattr(p, "identity", "?")
+            "participant disconnected: %s reason=%s",
+            getattr(p, "identity", "?"),
+            _reason_name(getattr(p, "disconnect_reason", None)),
         ),
     )
 

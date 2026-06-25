@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { TokenSource } from 'livekit-client';
-import { useSession } from '@livekit/components-react';
+import { useEffect, useMemo, useState } from 'react';
+import { RoomEvent, TokenSource } from 'livekit-client';
+import { useRoomContext, useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import { type AppConfig, CLONE_SELECTION, DEFAULT_VOICE_ID } from '@/app-config';
 import { AgentSessionProvider } from '@/components/agents-ui/agent-session-provider';
 import { StartAudioButton } from '@/components/agents-ui/start-audio-button';
+import { ErrorBoundary } from '@/components/app/error-boundary';
 import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
@@ -14,6 +15,24 @@ import { getSandboxTokenSource } from '@/lib/utils';
 
 function AppSetup() {
   useAgentErrors();
+
+  // Log why the room ever disconnects/reconnects, so a "crash mid-convo" shows its
+  // client-side reason in the console (network/signal drop vs a client-initiated end).
+  const room = useRoomContext();
+  useEffect(() => {
+    const onDisconnected = (reason?: unknown) =>
+      console.warn('[room] disconnected, reason=', reason);
+    const onReconnecting = () => console.warn('[room] reconnecting…');
+    const onReconnected = () => console.warn('[room] reconnected');
+    room.on(RoomEvent.Disconnected, onDisconnected);
+    room.on(RoomEvent.Reconnecting, onReconnecting);
+    room.on(RoomEvent.Reconnected, onReconnected);
+    return () => {
+      room.off(RoomEvent.Disconnected, onDisconnected);
+      room.off(RoomEvent.Reconnecting, onReconnecting);
+      room.off(RoomEvent.Reconnected, onReconnected);
+    };
+  }, [room]);
 
   return null;
 }
@@ -64,11 +83,13 @@ export function App({ appConfig }: AppProps) {
     <AgentSessionProvider session={session}>
       <AppSetup />
       <main className="grid h-svh grid-cols-1 place-content-center">
-        <ViewController
-          appConfig={appConfig}
-          selection={selection}
-          onSelectionChange={setSelection}
-        />
+        <ErrorBoundary>
+          <ViewController
+            appConfig={appConfig}
+            selection={selection}
+            onSelectionChange={setSelection}
+          />
+        </ErrorBoundary>
       </main>
       <StartAudioButton label="Start Audio" />
       <Toaster

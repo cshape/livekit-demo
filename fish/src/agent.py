@@ -53,12 +53,12 @@ CAPTURE_MAX_SECS = 30.0
 # fall back to DEFAULT_VOICE_ID for anything unexpected (incl. clone sessions,
 # which start in this voice while the user reads the clone script).
 PRESET_VOICES: dict[str, str] = {
+    "0e24ff9936d34df4bddce26398cf1311": "Maren (American F)",
     "747b05c0add940baa95270cf68c0cc2e": "Stellan (American M)",
     "41db1fc3c3624332bec9997ff3d3d353": "Maeve (British F)",
     "9a3a69c63dbc4774ac41b03945229dc8": "Alistair (British M)",
-    "0e24ff9936d34df4bddce26398cf1311": "Maren (US F)",
 }
-DEFAULT_VOICE_ID = "747b05c0add940baa95270cf68c0cc2e"  # Stellan
+DEFAULT_VOICE_ID = "0e24ff9936d34df4bddce26398cf1311"  # Maren (American F)
 
 # --- Clone-first flow --------------------------------------------------------
 # When the user picks "clone your voice" on the landing page, they read this

@@ -11,6 +11,12 @@ export interface PresetVoice {
 // Keep in sync with PRESET_VOICES in fish/src/agent.py.
 export const PRESET_VOICES: PresetVoice[] = [
   {
+    id: '0e24ff9936d34df4bddce26398cf1311',
+    name: 'Maren',
+    descriptor: 'American · Female',
+    sampleUrl: '/voice-samples/0e24ff9936d34df4bddce26398cf1311.mp3',
+  },
+  {
     id: '747b05c0add940baa95270cf68c0cc2e',
     name: 'Stellan',
     descriptor: 'American · Male',
@@ -28,18 +34,12 @@ export const PRESET_VOICES: PresetVoice[] = [
     descriptor: 'British · Male',
     sampleUrl: '/voice-samples/9a3a69c63dbc4774ac41b03945229dc8.mp3',
   },
-  {
-    id: '0e24ff9936d34df4bddce26398cf1311',
-    name: 'Maren',
-    descriptor: 'US · Female',
-    sampleUrl: '/voice-samples/0e24ff9936d34df4bddce26398cf1311.mp3',
-  },
 ];
 
 /** Sentinel selection value meaning "clone my own voice" rather than a preset id. */
 export const CLONE_SELECTION = 'clone' as const;
 
-/** Default landing-page selection — the first preset (Stellan). */
+/** Default landing-page selection — the first preset (Maren, American female). */
 export const DEFAULT_VOICE_ID = PRESET_VOICES[0].id;
 
 export interface AppConfig {

@@ -278,8 +278,8 @@ def build_instructions(cloned: bool = False) -> str:
 # Instructions for the one-shot greeting in a normal (preset-voice) session.
 PRESET_GREETING = (
     "Greet the user in ONE or two short sentences, no more: say you're a LiveKit voice agent "
-    "powered by Fish Audio's expressive speech, you're in professional mode now, and they can "
-    "ask you to switch to casual or give you a mood. Keep it brief and warm — don't list, don't "
+    "powered by Fish Audio's expressive speech, you're in casual mode now, and they can "
+    "ask you to switch to professional or give you a mood. Keep it brief and warm — don't list, don't "
     "over-explain, and don't mention voice cloning."
 )
 # Greeting after a successful clone — first line is already in the cloned voice.
@@ -287,24 +287,24 @@ CLONE_REVEAL_GREETING = (
     "You are NOW speaking in a clone of the user's own voice, just built from the script "
     "they read aloud. In one or two short sentences: warmly greet them and point out that "
     "this is their own cloned voice. Then introduce that you're a LiveKit agent with Fish "
-    "Audio's expressive text to speech, you're in professional mode right now, and they can "
-    "ask you to switch to casual or take on a mood. Keep it short; don't over-explain the cloning."
+    "Audio's expressive text to speech, you're in casual mode right now, and they can "
+    "ask you to switch to professional or take on a mood. Keep it short; don't over-explain the cloning."
 )
 # Greeting when cloning was skipped/failed — stays in the starting preset voice.
 CLONE_FALLBACK_GREETING = (
     "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
     "current voice. In one or two short sentences: lightly apologize that you couldn't quite "
     "catch enough to clone them, then greet them as a LiveKit agent with Fish Audio's expressive "
-    "text to speech — in professional mode now, and they can ask you to switch to casual or take "
+    "text to speech — in casual mode now, and they can ask you to switch to professional or take "
     "on a mood. Don't dwell on the failure."
 )
 
 
 class Assistant(Agent):
     def __init__(self) -> None:
-        # Register/mood start in the professional customer-service style; the
-        # set_style tool flips these at runtime by swapping the expressive preset.
-        self._mode: str = "professional"
+        # Register/mood start in the casual style; the set_style tool flips these
+        # at runtime by swapping the expressive preset.
+        self._mode: str = "casual"
         self._mood: str | None = None
         super().__init__(
             # Direct OpenAI (own API key). gpt-5.4-mini follows the expressive markup
@@ -771,7 +771,7 @@ async def my_agent(ctx: JobContext):
     assistant._agent_state = session.agent_state
     session.on("agent_state_changed", assistant._on_agent_state_changed)
 
-    # Seed the mood-ring indicator with the resting professional-mode state (both paths).
+    # Seed the mood-ring indicator with the resting starting-mode state (both paths).
     await assistant._set_style_attrs(
         mode=assistant._mode,
         mood="",

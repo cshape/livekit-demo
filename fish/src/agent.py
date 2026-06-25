@@ -684,7 +684,11 @@ class Assistant(Agent):
         return Agent.default.tts_node(self, stream, model_settings)
 
 
-server = AgentServer()
+# num_idle_processes prewarms job subprocesses; the SDK's prod default is 18, and
+# each one loads the agents runtime + silero VAD (~150-200MB), which blows past
+# Render's 512MB Starter tier. Keep a tiny pool (env-overridable) so memory stays
+# bounded — a single idle process keeps first-call latency low for the demo.
+server = AgentServer(num_idle_processes=int(os.getenv("NUM_IDLE_PROCESSES", "1")))
 
 
 def prewarm(proc: JobProcess):

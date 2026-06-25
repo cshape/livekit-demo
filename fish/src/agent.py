@@ -621,7 +621,11 @@ class Assistant(Agent):
             mode: "professional" (composed, customer-service register) or "casual" (relaxed,
                 playful, disfluent). Omit to keep the current register.
             mood: a short word for the emotion to perform in (e.g. "excited", "sleepy",
-                "calm", "playful"). Pass an empty string to clear the mood and go neutral.
+                "calm", "playful"). ONLY set this when the user explicitly asks for a mood or
+                emotion. When they just switch register (e.g. "go casual"), OMIT mood entirely
+                — do NOT invent one (especially not "calm", which flattens the casual energy);
+                leave it neutral so the register's own personality comes through. Pass an empty
+                string to clear a previously set mood.
             color: the mood-ring color that best matches the mood, for the on-screen
                 indicator — gray = stressed/tense/anxious; amber = nervous/unsettled/unsure;
                 green = calm/relaxed/balanced; blue = happy/active/at ease; violet =

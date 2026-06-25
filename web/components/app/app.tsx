@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { LogLevel, RoomEvent, TokenSource, setLogLevel } from 'livekit-client';
+import { RoomEvent, TokenSource } from 'livekit-client';
 import { useRoomContext, useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import { type AppConfig, CLONE_SELECTION, DEFAULT_VOICE_ID } from '@/app-config';
@@ -31,23 +31,6 @@ function AppSetup() {
       room.off(RoomEvent.Disconnected, onDisconnected);
       room.off(RoomEvent.Reconnecting, onReconnecting);
       room.off(RoomEvent.Reconnected, onReconnected);
-    };
-  }, [room]);
-
-  // TEMP DIAGNOSTIC: the call drops with reason=CLIENT_INITIATED, i.e. our own JS calls
-  // room.disconnect(). Patch it to log a stack trace so the next repro reveals the exact
-  // caller (useAgentErrors end() vs useSession's onmount/connect-false path vs other).
-  // Remove once the disconnect source is identified.
-  useEffect(() => {
-    setLogLevel(LogLevel.debug);
-    const r = room as unknown as { disconnect: (...a: unknown[]) => unknown };
-    const orig = r.disconnect.bind(room);
-    r.disconnect = (...args: unknown[]) => {
-      console.error('[DISCONNECT CALLED] stack:\n', new Error().stack);
-      return orig(...args);
-    };
-    return () => {
-      r.disconnect = orig;
     };
   }, [room]);
 

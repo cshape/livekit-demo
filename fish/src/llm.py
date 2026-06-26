@@ -9,8 +9,11 @@ self-hosted model needs no fork and no custom `llm.LLM` subclass — just a base
 When `LLM_BASE_URL` is set we target that endpoint (e.g. the Gemma model served via
 SGLang at `https://...api.fish.audio/v1`); otherwise we fall back to direct OpenAI.
 
-The conversation LLM and the cosmetic mood-ring classifier both follow the same
-`LLM_BASE_URL` switch, so a single env flips the whole agent onto our own model.
+The conversation LLM follows `LLM_BASE_URL`. The cosmetic mood-ring classifier is
+decoupled: it follows its OWN `MOOD_BASE_URL` (default: direct OpenAI on the cheap
+`MOOD_MODEL`), so the conversation can run on our self-hosted model while the mood
+ring stays on a small OpenAI model — set `MOOD_BASE_URL` only if you also want the
+mood ring on a custom endpoint.
 """
 
 import os
@@ -39,7 +42,13 @@ def build_llm(default_openai_model: str) -> openai.LLM:
             api_key=os.getenv("LLM_API_KEY"),
             **kwargs,
         )
-    return openai.LLM(model=os.getenv("OPENAI_MODEL", default_openai_model))
+    model = os.getenv("OPENAI_MODEL", default_openai_model)
+    kwargs = {}
+    # Thinking off: gpt-5 / o-series support reasoning_effort="none" for low-latency,
+    # non-reasoning replies (older chat models don't take the param at all).
+    if model.startswith(("gpt-5", "o1", "o3", "o4")):
+        kwargs["reasoning_effort"] = "none"
+    return openai.LLM(model=model, **kwargs)
 
 
 def build_mood_client(default_openai_model: str) -> tuple[AsyncOpenAI, str]:
@@ -47,12 +56,19 @@ def build_mood_client(default_openai_model: str) -> tuple[AsyncOpenAI, str]:
 
     A raw `AsyncOpenAI` rather than the LiveKit plugin (the classifier makes a
     direct `chat.completions.create` JSON-mode call, off the agent pipeline).
-    Same `LLM_BASE_URL` switch as `build_llm`: our own endpoint with `LLM_MODEL`
-    (override just the mood model via `MOOD_MODEL`), else direct OpenAI.
+
+    Decoupled from `build_llm`'s `LLM_BASE_URL`: the mood ring follows its OWN
+    `MOOD_BASE_URL` (with `MOOD_API_KEY`, falling back to `LLM_API_KEY`), else direct
+    OpenAI on the cheap `MOOD_MODEL` (default `gpt-4.1-mini`). So switching the
+    conversation onto our own endpoint leaves the mood ring on OpenAI unless you opt
+    it in too.
     """
-    base_url = os.getenv("LLM_BASE_URL")
+    base_url = os.getenv("MOOD_BASE_URL")
     if base_url:
-        client = AsyncOpenAI(base_url=base_url, api_key=os.getenv("LLM_API_KEY"))
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=os.getenv("MOOD_API_KEY") or os.getenv("LLM_API_KEY"),
+        )
         model = os.getenv("MOOD_MODEL") or os.getenv(
             "LLM_MODEL", "google/gemma-4-26B-A4B-it"
         )

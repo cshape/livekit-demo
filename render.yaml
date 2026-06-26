@@ -66,11 +66,16 @@ envVarGroups:
         sync: false
       - key: FISH_API_KEY
         sync: false
-      # Own LLM: point the openai plugin + mood classifier at our self-hosted
-      # Gemma (worker-only). Drop LLM_BASE_URL to fall back to direct OpenAI.
+      # Conversation LLM: point the openai plugin at our self-hosted Gemma
+      # (worker-only). Drop LLM_BASE_URL to fall back to direct OpenAI (OPENAI_MODEL).
       - key: LLM_BASE_URL
         value: https://sglang-fish-agent-gemma4-26b-a4b.dallas.api.fish.audio/v1
       - key: LLM_MODEL
         value: google/gemma-4-26B-A4B-it
       - key: LLM_API_KEY
         sync: false
+      # Mood ring is decoupled from the conversation LLM (see src/llm.py): it follows
+      # MOOD_BASE_URL (unset here -> direct OpenAI) on MOOD_MODEL, so it stays on a
+      # small OpenAI model even while the conversation runs on Gemma.
+      - key: MOOD_MODEL
+        value: gpt-4.1-mini

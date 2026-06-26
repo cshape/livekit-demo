@@ -23,9 +23,9 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, openai, silero
-from openai import AsyncOpenAI
+from livekit.plugins import assemblyai, fishaudio, silero
 
+from llm import build_llm, build_mood_client
 from voice_clone import (
     PassthroughCaptureAudioInput,
     create_voice_clone,
@@ -251,9 +251,10 @@ def _expressive_for(mode: str) -> dict:
 # A small, independent LLM reads each line the agent just SPOKE and judges the emotion
 # it conveys, mapping it to a one-word mood + a ring color. The result drives ONLY the
 # on-screen mood ring — it never enters the agent's prompt or affects delivery. Runs in
-# the agent process (it already has the transcript and the OpenAI key), on its own cheap
-# model so it's fast and doesn't compete with the conversation LLM.
-MOOD_MODEL = os.getenv("MOOD_MODEL", "gpt-4.1-mini")
+# the agent process, on its own cheap model so it's fast and doesn't compete with the
+# conversation LLM. Provider follows the same LLM_BASE_URL switch as the agent LLM (see
+# llm.build_mood_client); default is OpenAI gpt-4.1-mini.
+DEFAULT_MOOD_MODEL = "gpt-4.1-mini"
 _RING_COLORS = {"gray", "amber", "green", "blue", "violet"}
 _MOOD_SYSTEM_PROMPT = (
     "You are a mood ring for a voice assistant. You are given the single line the "
@@ -326,9 +327,11 @@ class Assistant(Agent):
         # toggle (set_mode RPC -> apply_mode), which swaps the expressive preset.
         self._mode: str = "casual"
         super().__init__(
-            # Direct OpenAI (own API key). gpt-5.1 follows the expressive markup well
-            # (rich casual disfluency/sounds, composed professional). Model env-overridable.
-            llm=openai.LLM(model=os.getenv("OPENAI_MODEL", "gpt-5.1")),
+            # Provider chosen by env (see llm.build_llm): our own OpenAI-compatible
+            # endpoint when LLM_BASE_URL is set, else direct OpenAI gpt-5.1 (which
+            # follows the expressive markup well). The mood classifier below stays on
+            # direct OpenAI regardless.
+            llm=build_llm(default_openai_model="gpt-5.1"),
             instructions=build_instructions(),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent
@@ -338,7 +341,9 @@ class Assistant(Agent):
         )
         # Cheap, separate LLM that reads each spoken line and classifies the mood it
         # conveys for the on-screen ring. Independent of the conversation LLM/prompt.
-        self._mood_client = AsyncOpenAI()
+        self._mood_client, self._mood_model = build_mood_client(
+            default_openai_model=DEFAULT_MOOD_MODEL
+        )
         self._mood_task: asyncio.Task[None] | None = None
         # Recent mood labels fed back into the classifier so it varies its word choice
         # turn to turn instead of getting stuck on one (e.g. "playful").
@@ -719,7 +724,7 @@ class Assistant(Agent):
             )
         try:
             resp = await self._mood_client.chat.completions.create(
-                model=MOOD_MODEL,
+                model=self._mood_model,
                 messages=[
                     {"role": "system", "content": _MOOD_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},

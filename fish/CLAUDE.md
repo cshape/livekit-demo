@@ -9,7 +9,7 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 ## Stack
 
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
-- **LLM**: OpenAI `gpt-5.1` (`livekit-plugins-openai`, direct via `OPENAI_API_KEY`); model overridable via `OPENAI_MODEL`. The cosmetic mood-ring classifier runs separately on the cheaper `MOOD_MODEL` (default `gpt-4.1-mini`).
+- **LLM**: chosen by `src/llm.py` (`build_llm` for the conversation LLM, `build_mood_client` for the mood classifier). Default is OpenAI `gpt-5.1` (`livekit-plugins-openai`, direct via `OPENAI_API_KEY`, override with `OPENAI_MODEL`); the cosmetic mood-ring classifier runs separately on the cheaper `MOOD_MODEL` (default `gpt-4.1-mini`). Set `LLM_BASE_URL` to point **both** at our own OpenAI-compatible endpoint instead — e.g. self-hosted Gemma via SGLang at `https://sglang-fish-agent-gemma4-26b-a4b.dallas.api.fish.audio/v1` (`LLM_MODEL=google/gemma-4-26B-A4B-it`, `LLM_API_KEY=<bearer>`; `MOOD_MODEL` can override just the mood model). No SDK fork — the plugin is a generic `/v1/chat/completions` client, so `livekit-agents` stays freely upgradable; the provider choice is the one seam we own (`src/llm.py`).
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
 - **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
@@ -21,8 +21,13 @@ LIVEKIT_URL=ws://localhost:7880
 LIVEKIT_API_KEY=devkey
 LIVEKIT_API_SECRET=secret
 ASSEMBLYAI_API_KEY=...
-OPENAI_API_KEY=...  # agent LLM + the cosmetic mood classifier
+OPENAI_API_KEY=...  # agent LLM + the cosmetic mood classifier (when LLM_BASE_URL unset)
 FISH_API_KEY=...
+# Own LLM (optional): point the openai plugin + mood classifier at our endpoint
+LLM_BASE_URL=https://sglang-fish-agent-gemma4-26b-a4b.dallas.api.fish.audio/v1
+LLM_MODEL=google/gemma-4-26B-A4B-it
+LLM_API_KEY=...     # bearer token for LLM_BASE_URL
+# LLM_TEMPERATURE=0.6 / MOOD_MODEL=...  # optional
 ```
 
 Fish reads `FISH_API_KEY`, not `FISH_AUDIO_API_KEY`.

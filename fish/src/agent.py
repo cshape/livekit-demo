@@ -831,7 +831,14 @@ async def my_agent(ctx: JobContext):
     )
 
     session = AgentSession(
-        stt=assemblyai.STT(),
+        # Aggressive end-of-turn: lean on AssemblyAI's semantic endpoint to fire
+        # fast on confident pauses. min_turn_silence is the confident-end debounce,
+        # max_turn_silence the safety net for longer unconfident pauses.
+        stt=assemblyai.STT(
+            end_of_turn_confidence_threshold=0.4,
+            min_turn_silence=160,
+            max_turn_silence=1500,
+        ),
         tts=fishaudio.TTS(
             model="s2.1-pro",
             voice_id=start_voice,
@@ -847,6 +854,10 @@ async def my_agent(ctx: JobContext):
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],
+        # Trust the STT's endpoint (no added floor); 1.5s is just a hard safety
+        # ceiling so the agent never hangs waiting on an unconfident endpoint.
+        min_endpointing_delay=0.0,
+        max_endpointing_delay=1.5,
         # preemptive_generation is intentionally OFF. It starts generating the reply
         # while the user is still talking — before on_user_turn_completed runs — so the
         # StopResponse we raise there to stay silent during the clone-script read would

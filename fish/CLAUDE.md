@@ -11,8 +11,22 @@ This is a LiveKit Agents (Python) project: use `uv` for everything, app code liv
 - **STT**: AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
 - **LLM**: chosen by `src/llm.py` (`build_llm` for the conversation LLM, `build_mood_client` for the mood classifier). Default is OpenAI `gpt-5.1` (`livekit-plugins-openai`, direct via `OPENAI_API_KEY`, override with `OPENAI_MODEL`); the cosmetic mood-ring classifier runs separately on the cheaper `MOOD_MODEL` (default `gpt-4.1-mini`). Set `LLM_BASE_URL` to point **both** at our own OpenAI-compatible endpoint instead — e.g. self-hosted Gemma via SGLang at `https://sglang-fish-agent-gemma4-26b-a4b.dallas.api.fish.audio/v1` (`LLM_MODEL=google/gemma-4-26B-A4B-it`, `LLM_API_KEY=<bearer>`; `MOOD_MODEL` can override just the mood model). No SDK fork — the plugin is a generic `/v1/chat/completions` client, so `livekit-agents` stays freely upgradable; the provider choice is the one seam we own (`src/llm.py`).
 - **TTS**: Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
-- **VAD / turn**: silero VAD only (no separate turn-detector model — keeps the worker footprint inside Render's 512MB Starter tier)
+- **VAD / turn**: silero VAD only (no separate turn-detector model). This (plus `JOB_EXECUTOR=thread` / `NUM_IDLE_PROCESSES=1` in `agent.py`) was a footprint tuning for Render's old 512MB worker; the worker now runs on LiveKit Cloud Agents (8 cores / 16GB), so there's headroom to flip `JOB_EXECUTOR=process` and re-add the semantic turn-detector if wanted — not done yet.
 - Runs against self-hosted `livekit-server --dev` (defaults: `ws://localhost:7880`, key `devkey`, secret `secret`) — also works against LiveKit Cloud.
+
+## Deployment
+
+The worker is deployed to **LiveKit Cloud Agents** (not Render anymore — Render hosts only the web frontend + `/api/token`). Build is the `Dockerfile`; `livekit.toml` pins the agent id + project subdomain. Provider keys (`FISH_API_KEY`, `ASSEMBLYAI_API_KEY`, `OPENAI_API_KEY`, the `LLM_*` Gemma vars, `MOOD_MODEL`) are **agent secrets** (`lk agent secrets`); `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` are injected by LiveKit, never set as secrets.
+
+```bash
+cd fish
+lk agent deploy                          # ship a new version after code changes
+lk agent status                          # rollout / replicas / CPU / mem
+lk agent logs                            # runtime logs
+lk agent update-secrets --secrets-file <f>   # change secrets (restarts the agent)
+```
+
+Gotcha: `uv sync` clones `livekit-agents` + the fishaudio plugin from a git source (the expressive fork in `pyproject.toml`), so the build image needs `git` — it's installed in the `Dockerfile` build stage. Without it the Cloud build fails at `uv sync` with "Git executable not found" (local/Render builds happen to have git already).
 
 ## `.env.local` (gitignored)
 

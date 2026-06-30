@@ -61,18 +61,46 @@ standalone (and Docker) instructions:
 With Compose you can also target one service: `docker compose up --build agent`
 or `docker compose up --build web`.
 
-## Deploy to Render
+## Deploy
 
-This repo ships a [Render Blueprint](https://render.com/docs/infrastructure-as-code) (`render.yaml`)
-that provisions both services from a single click — no Docker needed.
+The two halves deploy to two places: the **frontend** to Render, the **agent
+worker** to LiveKit Cloud Agents (co-located with the media server). Both target
+the same LiveKit Cloud project.
+
+### Frontend → Render
+
+`render.yaml` is a [Render Blueprint](https://render.com/docs/infrastructure-as-code)
+for the web service only (the landing page + the `/api/token` route).
 
 1. Push the repo to GitHub.
 2. In the Render dashboard: **New → Blueprint**, pick this repo. Render reads
-   `render.yaml` and creates both services — `livekit-demo-web` (Next.js
-   frontend) and `livekit-demo-agent` (Python worker).
-3. Fill in the `livekit-demo-shared` env-var group with your real LiveKit /
-   Fish / AssemblyAI / OpenAI keys.
-4. Hit deploy. Both services come up against the same LiveKit Cloud project.
+   `render.yaml` and creates `livekit-demo-web`.
+3. Fill in the `livekit-demo-shared` env-var group with your LiveKit Cloud
+   project's `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` — the same
+   project the agent is deployed to, or named dispatch finds no worker and calls
+   hang. No provider keys here; those are the agent's secrets (below).
+
+### Agent worker → LiveKit Cloud Agents
+
+The worker deploys with the [`lk` CLI](https://docs.livekit.io/agents/ops/deployment/)
+from `fish/` (its `Dockerfile` is the build; `fish/livekit.toml` pins the agent
+id + project). Provider keys are stored as agent secrets, not env vars — and
+`LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` are injected
+automatically by LiveKit, so you never set them.
+
+```bash
+cd fish
+lk cloud auth                 # or: lk project add … (link the project once)
+# first deploy (creates the agent + livekit.toml):
+lk agent create --region us-east --secrets-file <your-secrets.env> .
+# subsequent deploys (after code changes):
+lk agent deploy
+lk agent status               # rollout / replicas
+lk agent logs                 # runtime logs
+```
+
+The agent's dispatch name comes from `@server.rtc_session(agent_name="fish-demo")`
+in `src/agent.py` and must match `agentName` in `web/app-config.ts`.
 
 ## How it works
 

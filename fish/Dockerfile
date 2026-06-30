@@ -27,10 +27,14 @@ FROM base AS build
 # gcc: C compiler needed for building Python packages with C extensions
 # g++: C++ compiler needed for building Python packages with C++ extensions
 # python3-dev: Python development headers needed for compilation
+# git: required by `uv sync` to clone the livekit-agents / fishaudio git sources
+#   (the expressive fork in pyproject.toml). The uv base image ships no git, so
+#   the clone fails without this; Render/local builds happen to have git already.
 # We clean up the apt cache after installation to keep the image size down
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    git \
     python3-dev \
   && rm -rf /var/lib/apt/lists/*
 

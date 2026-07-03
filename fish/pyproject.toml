@@ -11,6 +11,10 @@ requires-python = ">=3.10, <3.15"
 dependencies = [
     "livekit-agents[assemblyai,openai,silero]>=1.6.0",
     "livekit-plugins-fishaudio>=1.6.0",
+    # Temporary: Cartesia TTS as an A/B against Fish for the first-utterance crackle
+    # investigation (flip with TTS_PROVIDER). Pulled from the same expressive fork so
+    # the markup->provider conversion (Cartesia SSML) matches the pinned core SDK.
+    "livekit-plugins-cartesia>=1.6.0",
     "python-dotenv",
 ]
 
@@ -33,6 +37,7 @@ constraint-dependencies = ["yarl<1.24"]
 [tool.uv.sources]
 livekit-agents = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-agents" }
 livekit-plugins-fishaudio = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-fishaudio" }
+livekit-plugins-cartesia = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-cartesia" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

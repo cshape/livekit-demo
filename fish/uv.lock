@@ -537,6 +537,7 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "livekit-agents", extra = ["assemblyai", "openai", "silero"] },
+    { name = "livekit-plugins-cartesia" },
     { name = "livekit-plugins-fishaudio" },
     { name = "python-dotenv" },
 ]
@@ -551,6 +552,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "livekit-agents", extras = ["assemblyai", "openai", "silero"], git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-agents&branch=cale%2Fexpressive-fish" },
+    { name = "livekit-plugins-cartesia", git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-cartesia&branch=cale%2Fexpressive-fish" },
     { name = "livekit-plugins-fishaudio", git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-fishaudio&branch=cale%2Fexpressive-fish" },
     { name = "python-dotenv" },
 ]
@@ -1109,6 +1111,14 @@ wheels = [
 name = "livekit-plugins-assemblyai"
 version = "1.6.2"
 source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-assemblyai&branch=cale%2Fexpressive-fish#c0d48eb7b627e7cc73f183d39ec6e7db4cc2397e" }
+dependencies = [
+    { name = "livekit-agents" },
+]
+
+[[package]]
+name = "livekit-plugins-cartesia"
+version = "1.6.2"
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-cartesia&branch=cale%2Fexpressive-fish#c0d48eb7b627e7cc73f183d39ec6e7db4cc2397e" }
 dependencies = [
     { name = "livekit-agents" },
 ]

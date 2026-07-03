@@ -134,8 +134,8 @@ function MessageRow({ receivedMessage }: { receivedMessage: ReceivedMessage }) {
 
 // Messages spoken/heard during the clone-script read shouldn't land in the chat
 // (the user reading the script, the agent's read prompt/ack). We hide any message
-// seen while clone.state is 'prompt' or 'cloning'; the set persists so they stay
-// hidden once the real conversation begins.
+// seen while clone.state is 'prompt', 'reading', or 'cloning'; the set persists so
+// they stay hidden once the real conversation begins.
 function FilteredMessages({
   agent,
   messages,
@@ -145,7 +145,7 @@ function FilteredMessages({
 }) {
   const cloneState = useParticipantAttribute('clone.state', { participant: agent });
   const hiddenRef = useRef<Set<string>>(new Set());
-  if (cloneState === 'prompt' || cloneState === 'cloning') {
+  if (cloneState === 'prompt' || cloneState === 'reading' || cloneState === 'cloning') {
     for (const m of messages) hiddenRef.current.add(m.id);
   }
   const visible = messages.filter((m) => !hiddenRef.current.has(m.id));

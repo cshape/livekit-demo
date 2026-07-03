@@ -1,85 +1,43 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RemoteParticipant } from 'livekit-client';
+import { useEffect, useState } from 'react';
+import type { LocalAudioTrack, RemoteParticipant } from 'livekit-client';
 import { AnimatePresence, motion } from 'motion/react';
-import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
+import {
+  useLocalParticipant,
+  useMultibandTrackVolume,
+  useParticipantAttribute,
+  useVoiceAssistant,
+} from '@livekit/components-react';
 import { MicrophoneIcon } from '@phosphor-icons/react/dist/ssr';
 import { AgentChatIndicator } from '@/components/agents-ui/agent-chat-indicator';
 import { cn } from '@/lib/shadcn/utils';
 
-// Seconds at which the time-based highlight fallback reaches the end of the script.
-// Just a floor so the highlight keeps moving if STT lags — the actual clone trigger
-// is time-of-speech based on the backend (CLONE_SCRIPT_TARGET_SECS).
-const SCRIPT_TARGET_SECS = 14;
+// Mirrors CLONE_READ_SECS in fish/src/agent.py; the agent also publishes it as
+// `clone.read_secs`, which wins over this fallback.
+const DEFAULT_READ_SECS = 15;
 
-function normalize(word: string): string {
-  return word.toLowerCase().replace(/[^a-z0-9']/g, '');
-}
+const WAVEFORM_BANDS = 20;
 
-// Small bounded edit distance — returns true if within `max` edits. Used so STT
-// near-misses (e.g. "harbour" vs "harbor") still count as a match.
-function withinEdits(a: string, b: string, max: number): boolean {
-  if (Math.abs(a.length - b.length) > max) return false;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let best = i;
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
-      cur.push(v);
-      if (v < best) best = v;
-    }
-    if (best > max) return false; // whole row already exceeds budget
-    prev = cur;
-  }
-  return prev[b.length] <= max;
-}
-
-function wordsMatch(heard: string, script: string): boolean {
-  if (!heard || !script) return false;
-  if (heard === script) return true;
-  // Prefix match handles STT cutting a word short or adding a suffix.
-  if (
-    heard.length >= 3 &&
-    script.length >= 3 &&
-    (heard.startsWith(script) || script.startsWith(heard))
-  )
-    return true;
-  // Fuzzy: allow 1 edit for short words, 2 for longer ones.
-  return withinEdits(heard, script, script.length >= 6 ? 2 : 1);
-}
-
-// Align the heard transcript against the script words and return how many script
-// words have been read. Greedy with a forward window (skip ahead past STT drops)
-// and a small backward window (recover when we got slightly ahead).
-function matchedWordCount(scriptWords: string[], heard: string): number {
-  const H = heard.split(/\s+/).map(normalize).filter(Boolean);
-  if (!H.length || !scriptWords.length) return 0;
-  const FWD = 6;
-  const BACK = 2;
-  let si = 0;
-  for (const h of H) {
-    let found = -1;
-    for (let j = si; j < Math.min(scriptWords.length, si + FWD); j++) {
-      if (wordsMatch(h, scriptWords[j])) {
-        found = j;
-        break;
-      }
-    }
-    if (found === -1) {
-      for (let j = si - 1; j >= Math.max(0, si - BACK); j--) {
-        if (wordsMatch(h, scriptWords[j])) {
-          found = j;
-          break;
-        }
-      }
-    }
-    if (found !== -1) si = found + 1;
-    // else: unmatched heard word (STT noise) — skip it.
-  }
-  return si;
+// Subtle waveform driven by the LOCAL mic level — live feedback that the reading is
+// being heard. Bars sit at a faint minimum when silent and swell while speaking.
+function MicWaveform() {
+  const { microphoneTrack } = useLocalParticipant();
+  const volumes = useMultibandTrackVolume(microphoneTrack?.track as LocalAudioTrack | undefined, {
+    bands: WAVEFORM_BANDS,
+  });
+  const bands = volumes.length === WAVEFORM_BANDS ? volumes : Array(WAVEFORM_BANDS).fill(0);
+  return (
+    <div className="flex h-5 items-center justify-center gap-1" aria-hidden="true">
+      {bands.map((volume, i) => (
+        <span
+          key={i}
+          className="bg-primary/60 w-1 rounded-full transition-[height] duration-100 ease-out"
+          style={{ height: `${3 + Math.min(1, volume) * 17}px` }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export function CloneScriptCard({ className }: { className?: string }) {
@@ -97,51 +55,30 @@ function CloneScriptCardInner({
 }) {
   const state = useParticipantAttribute('clone.state', { participant: agent });
   const script = useParticipantAttribute('clone.script', { participant: agent }) ?? '';
-  const heard = useParticipantAttribute('clone.heard', { participant: agent }) ?? '';
-  const rawSecs = useParticipantAttribute('clone.capture_secs', { participant: agent });
+  const rawReadSecs = useParticipantAttribute('clone.read_secs', { participant: agent });
 
-  const reading = state === 'prompt';
+  const readSecs = Number(rawReadSecs) > 0 ? Number(rawReadSecs) : DEFAULT_READ_SECS;
+  const reading = state === 'reading';
   const cloning = state === 'cloning';
-  const show = (reading || cloning) && Boolean(script);
+  const show = (state === 'prompt' || reading || cloning) && Boolean(script);
 
-  const words = useMemo(() => script.split(/\s+/).filter(Boolean), [script]);
-  const normWords = useMemo(() => words.map(normalize), [words]);
-
-  // Primary signal: how many words the STT says we've read.
-  const matched = useMemo(() => matchedWordCount(normWords, heard), [normWords, heard]);
-
-  // Fallback: once the user starts speaking, advance a time floor so the
-  // highlight keeps progressing even if STT lags or returns nothing.
-  const secs = Number.isFinite(Number(rawSecs)) ? Number(rawSecs) : 0;
-  const speechStarted = heard.trim().length > 0 || secs > 0;
-  const startRef = useRef<number | null>(null);
-  const [elapsed, setElapsed] = useState(0);
-
+  // Local mirror of the agent's fixed read window: counts down from readSecs once
+  // clone.state flips to "reading". Display-only — the agent runs the authoritative
+  // timer and clones whatever it captured when its own window closes.
+  const [remaining, setRemaining] = useState(readSecs);
   useEffect(() => {
-    if (!show) {
-      startRef.current = null;
-      setElapsed(0);
+    if (!reading) {
+      setRemaining(readSecs);
+      return;
     }
-  }, [show]);
-
-  useEffect(() => {
-    if (show && speechStarted && startRef.current === null) {
-      startRef.current = performance.now();
-    }
-  }, [show, speechStarted]);
-
-  useEffect(() => {
-    if (!show) return;
+    const startedAt = performance.now();
     const id = setInterval(() => {
-      if (startRef.current !== null) {
-        setElapsed((performance.now() - startRef.current) / 1000);
-      }
-    }, 150);
+      setRemaining(Math.max(0, readSecs - (performance.now() - startedAt) / 1000));
+    }, 100);
     return () => clearInterval(id);
-  }, [show]);
+  }, [reading, readSecs]);
 
-  const timeFloor = Math.floor((elapsed / SCRIPT_TARGET_SECS) * words.length);
-  const highlightCount = Math.min(words.length, Math.max(matched, timeFloor));
+  const progress = reading ? Math.min(1, Math.max(0, 1 - remaining / readSecs)) : 0;
 
   return (
     <AnimatePresence>
@@ -168,24 +105,27 @@ function CloneScriptCardInner({
             <>
               <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs font-medium tracking-wide uppercase">
                 <MicrophoneIcon weight="fill" className="size-4" />
-                Read this aloud to clone your voice
+                {reading
+                  ? `Keep reading — cloning in ${Math.ceil(remaining)}s`
+                  : 'Read this aloud to clone your voice'}
               </div>
 
-              <p className="mt-4 text-center text-lg leading-relaxed text-pretty">
-                {words.map((word, i) => (
-                  <span
-                    key={i}
-                    className={cn(
-                      'transition-colors duration-200',
-                      i < highlightCount
-                        ? 'text-foreground font-medium'
-                        : 'text-muted-foreground/40'
-                    )}
-                  >
-                    {word}{' '}
-                  </span>
-                ))}
+              <p className="text-foreground mt-4 text-center text-lg leading-relaxed text-pretty">
+                {script}
               </p>
+
+              {/* Live "we hear you" waveform (local mic level) */}
+              <div className="mt-4">
+                <MicWaveform />
+              </div>
+
+              {/* Countdown bar for the fixed read window */}
+              <div className="bg-muted mt-3 h-1 w-full overflow-hidden rounded-full">
+                <div
+                  className="bg-primary h-full rounded-full transition-[width] duration-100 ease-linear"
+                  style={{ width: `${progress * 100}%` }}
+                />
+              </div>
             </>
           )}
         </motion.div>

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -144,6 +145,63 @@ async def create_voice_clone(
         if resp.status >= 400:
             raise RuntimeError(f"Fish create-model failed: {resp.status} {body}")
         return json.loads(body)["_id"]
+
+
+# What every voice-design candidate says in its generated sample. The sample is the
+# ONLY reference audio the TTS model is built from, so keep it long enough (~10s of
+# speech) for a decent clone. The API caps reference_text at 150 characters.
+DESIGN_REFERENCE_TEXT = (
+    "Well, hello there! I'm brand new — designed from a short description just a "
+    "moment ago. Let's find out together how I sound out loud."
+)
+
+
+async def design_voice_sample(api_key: str, instruction: str) -> bytes:
+    """Generate ONE candidate voice from a natural-language description via Fish's
+    voice-design API and return its audio (WAV bytes). The endpoint is stateless —
+    it creates no model; turning the candidate into a usable TTS voice is a separate
+    create-model call with this audio as the reference."""
+    payload = {
+        "instruction": instruction,
+        "reference_text": DESIGN_REFERENCE_TEXT,
+        "n": 1,
+    }
+    async with (
+        aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session,
+        session.post(
+            f"{FISH_BASE_URL}/v1/voice-design",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                # The endpoint requires the design model pinned via this header.
+                "model": "voice-design-1",
+            },
+            json=payload,
+        ) as resp,
+    ):
+        body = await resp.text()
+        if resp.status >= 400:
+            raise RuntimeError(f"Fish voice-design failed: {resp.status} {body}")
+        candidates = json.loads(body).get("candidates") or []
+        if not candidates:
+            raise RuntimeError("Fish voice-design returned no candidates")
+        return base64.b64decode(candidates[0]["audio_base64"])
+
+
+async def create_designed_voice(api_key: str, instruction: str) -> str:
+    """Design a voice from `instruction` and register it as a private TTS model.
+    Returns the model_id, usable as a fishaudio voice_id (and deletable with
+    delete_voice_clone like any other ephemeral demo voice)."""
+    sample = await design_voice_sample(api_key, instruction)
+    # We know exactly what the sample says (DESIGN_REFERENCE_TEXT), so pass it as
+    # the reference transcript — unlike the clone-read flow, there's no risk of a
+    # text/audio mismatch and it improves fidelity.
+    return await create_voice_clone(
+        api_key,
+        sample,
+        title="livekit-demo-design",
+        transcript=DESIGN_REFERENCE_TEXT,
+    )
 
 
 async def delete_voice_clone(api_key: str, model_id: str) -> None:

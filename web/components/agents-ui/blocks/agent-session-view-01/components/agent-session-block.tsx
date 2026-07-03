@@ -10,6 +10,7 @@ import {
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { CloneScriptCard } from '@/components/app/clone-script-card';
+import { DesignStatusCard } from '@/components/app/design-status-card';
 import { ModeToggle } from '@/components/app/mode-toggle';
 import { MoodIndicator } from '@/components/app/mood-indicator';
 import { cn } from '@/lib/shadcn/utils';
@@ -173,9 +174,11 @@ export function AgentSessionView_01({
     >
       <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
 
-      {/* Clone-script prompt — centered overlay shown only during clone-first read */}
+      {/* Centered overlays: clone-script prompt during the clone-first read, and the
+          design-build indicator while a designed voice is generated */}
       <div className="pointer-events-none absolute inset-x-4 top-1/2 z-30 -translate-y-1/2">
         <CloneScriptCard />
+        <DesignStatusCard />
       </div>
 
       {/* transcript */}

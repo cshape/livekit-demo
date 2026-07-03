@@ -31,9 +31,17 @@ interface ViewControllerProps {
   appConfig: AppConfig;
   selection: string;
   onSelectionChange: (selection: string) => void;
+  designInstruction: string;
+  onDesignInstructionChange: (value: string) => void;
 }
 
-export function ViewController({ appConfig, selection, onSelectionChange }: ViewControllerProps) {
+export function ViewController({
+  appConfig,
+  selection,
+  onSelectionChange,
+  designInstruction,
+  onDesignInstructionChange,
+}: ViewControllerProps) {
   const { isConnected, start } = useSessionContext();
 
   return (
@@ -46,6 +54,8 @@ export function ViewController({ appConfig, selection, onSelectionChange }: View
           startButtonText={appConfig.startButtonText}
           selection={selection}
           onSelectionChange={onSelectionChange}
+          designInstruction={designInstruction}
+          onDesignInstructionChange={onDesignInstructionChange}
           onStartCall={start}
         />
       )}

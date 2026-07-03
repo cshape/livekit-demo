@@ -5,7 +5,6 @@ import logging
 import os
 import random
 import re
-import time
 from collections.abc import AsyncIterable
 
 from dotenv import load_dotenv
@@ -23,11 +22,13 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, silero
+from livekit.plugins import assemblyai, cartesia, fishaudio, silero
 
 from llm import build_llm, build_mood_client
 from voice_clone import (
+    FISH_BASE_URL,
     PassthroughCaptureAudioInput,
+    create_designed_voice,
     create_voice_clone,
     delete_voice_clone,
     frames_to_wav,
@@ -42,9 +43,9 @@ load_dotenv(".env.local")
 # which we read from ctx.job.metadata. Must match web/app-config.ts `agentName`.
 AGENT_NAME = "fish-demo"
 
-# Hard cap on buffered audio that gets uploaded to Fish. The clone read only needs
-# ~12-25s (see CLONE_SCRIPT_TARGET_SECS / _TIMEOUT_SECS), so cap well above that but
-# far below the old 60s — every buffered second is memory held on the 512MB worker.
+# Hard cap on buffered audio that gets uploaded to Fish. The clone read window is
+# CLONE_READ_SECS (15s) plus whatever the user speaks during the prompt line, so cap
+# well above that — every buffered second is memory held while the upload builds.
 CAPTURE_MAX_SECS = 30.0
 
 # --- Voice selection ---------------------------------------------------------
@@ -63,21 +64,21 @@ DEFAULT_VOICE_ID = "0e24ff9936d34df4bddce26398cf1311"  # Maren (American F)
 # --- Clone-first flow --------------------------------------------------------
 # When the user picks "clone your voice" on the landing page, they read this
 # script aloud at the start of the call; we capture it, clone, and switch into
-# their voice before the real conversation begins. ~50 words / ~18s of speech so
-# there's margin over the target. No bracket markers — the user reads it verbatim.
+# their voice before the real conversation begins. ~50 words — more than fits in
+# the CLONE_READ_SECS window, so nobody runs out of script mid-countdown. No
+# bracket markers — the user reads it verbatim.
 CLONE_SCRIPT = (
     "The quick morning light spread over the harbor as the boats headed out to sea. "
     "Honestly, there's nothing like a fresh cup of coffee and a clear blue sky to get "
     "the day going. I could talk about this stuff for hours — but let's hear how it sounds."
 )
-# Cumulative seconds of the user reading before we have enough to clone. Kept
-# modest and purely time-based (not match-based) so a mis-read, a skipped line, or
-# off-script chatter still clones fine — the reference transcript is the actual STT
-# of what they said, so it always matches their audio.
-CLONE_SCRIPT_TARGET_SECS = 12.0
-# Wall-clock budget for the read; if we hit it with at least CLONE_MIN_SECS of
-# audio we clone from the partial, otherwise we fall back to the preset voice.
-CLONE_SCRIPT_TIMEOUT_SECS = 25.0
+# Fixed read window: once the read prompt finishes playing we publish
+# clone.state="reading", wait exactly this long, and clone whatever was captured.
+# The frontend mirrors the same countdown on the script card. Purely time-based so
+# a mis-read, a skipped line, or off-script chatter still clones fine.
+CLONE_READ_SECS = 15.0
+# Minimum captured speech (per the capture tee's buffered seconds) to attempt a
+# clone; under this we fall back to the preset voice.
 CLONE_MIN_SECS = 6.0
 
 # Spoken in the starting (preset) voice to prompt the user to read the script. These
@@ -284,17 +285,29 @@ CLONED_VOICE_NOTE = (
 )
 
 
-def build_instructions(cloned: bool = False) -> str:
-    """Assemble the system prompt: CORE plus, for finished clone sessions, a slim note.
+DESIGNED_VOICE_NOTE = (
+    "VOICE NOTE: you are speaking in a voice the user just DESIGNED from a short written "
+    "description at the start of this call. It's a quick, temporary demo voice — it's deleted "
+    "when the call ends. If they want to design and keep production-grade voices, point them to "
+    "fish dot audio (say it as the three words 'fish dot audio'; a clickable link appears in the "
+    "transcript). Don't dwell on the design process — keep the focus on expressive speech, your "
+    "modes, and moods."
+)
+
+
+def build_instructions(cloned: bool = False, designed: bool = False) -> str:
+    """Assemble the system prompt: CORE plus, for clone/design sessions, a slim note.
 
     Register and mood no longer live in the instructions — they're carried by the
-    expressive preset (see `_expressive_for`). When `cloned` is set, a note is appended
-    so the agent knows it's speaking in the user's own voice and keeps the fish dot audio
-    CTA. Preset-voice sessions never include any cloning text.
+    expressive preset (see `_expressive_for`). When `cloned` (or `designed`) is set, a
+    note is appended so the agent knows whose voice it's speaking in and keeps the fish
+    dot audio CTA. Preset-voice sessions never include any cloning/design text.
     """
     parts = [CORE_INSTRUCTIONS]
     if cloned:
         parts.append(CLONED_VOICE_NOTE)
+    if designed:
+        parts.append(DESIGNED_VOICE_NOTE)
     return "\n\n".join(p.strip() for p in parts)
 
 
@@ -319,6 +332,113 @@ CLONE_FALLBACK_GREETING = (
     "enough to clone them, give a warm hello, and ask a curious question like how they're doing or "
     "what brought them here. Don't mention modes or toggles, and don't dwell on the failure."
 )
+
+# --- Design-first flow -------------------------------------------------------
+# When the user picks "design a voice" on the landing page, they type a description
+# of the voice they want; it rides the agent metadata as {"design": "<text>"}. The
+# worker starts building the voice (voice-design API -> create-model) the moment the
+# job starts — in parallel with session start and room connect — then greets in it.
+# Fish's API caps the instruction at 2000 chars; clamp whatever the frontend sends.
+DESIGN_INSTRUCTION_MAX_CHARS = 2000
+# Design generation + model creation budget; past this we fall back to the preset.
+DESIGN_TIMEOUT_SECS = 75.0
+
+
+# Instructions for the ack spoken (in the starting preset voice) while the designed
+# voice builds. LLM-generated rather than canned so it can make a light, specific
+# comment on what the user actually asked for. The LLM round trip runs while the
+# design API calls are already in flight, so it adds no wall-clock to the flow.
+def design_ack_instructions(description: str) -> str:
+    return (
+        "The user just asked you to DESIGN a brand-new voice from this description: "
+        f'"{description}". In ONE short, warm sentence: react with a light, playful '
+        "comment on their choice, and tell them to hang on just a moment while you "
+        "put it together. Don't greet them yet, don't ask any questions, and don't "
+        "mention modes, toggles, or the technical process."
+    )
+
+
+# Greeting after a successful design — first line is already in the designed voice.
+DESIGN_REVEAL_GREETING = (
+    "You are NOW speaking in a brand-new voice just designed from the user's own written "
+    "description. In one or two short sentences: warmly greet them in this new voice, point out "
+    "that this is the voice they designed, then ask them how it sounds. Don't mention modes or "
+    "toggles, and don't over-explain the design process."
+)
+# Greeting when the design failed — stays in the starting preset voice.
+DESIGN_FALLBACK_GREETING = (
+    "Designing the custom voice didn't go through, so you're staying in your current voice. In "
+    "one or two short sentences: lightly apologize that their designed voice didn't come "
+    "together this time, give a warm hello, and ask a curious question like what brought them "
+    "here. Don't mention modes or toggles, and don't dwell on the failure."
+)
+
+
+# --- TTS provider selection (temporary, for the crackle A/B) -----------------
+# The default is Fish Audio (the demo's hero). TTS_PROVIDER=cartesia swaps in
+# Cartesia so we can check whether the intermittent first-utterance crackle over
+# WebRTC is specific to Fish (its s2.1-pro output, or the fishaudio plugin's PCM
+# framing) or lives in the shared token-streamed generate_reply -> agents ->
+# WebRTC path.
+#
+# NOTE: this is NOT a PCM-vs-container test. Fish already runs output_format="pcm"
+# (24kHz s16le) and STILL crackled in repro. Cartesia also streams raw PCM s16le @
+# 24kHz, so BOTH feed the identical downstream (agents resample 24k->48k -> Opus ->
+# WebRTC); the only variables left are the vendor's actual first samples and each
+# plugin's chunk framing. So: Cartesia crackles too -> shared path (resampler /
+# Opus encoder / output priming); Cartesia clean -> Fish-specific.
+#
+# NOTE while on Cartesia: the clone-first flow (fishaudio.TTS.update_options) is a
+# no-op — it isinstance-checks for fishaudio.TTS and just logs a warning, staying in
+# the Cartesia preset voice. That's fine for the crackle repro, which is a preset,
+# non-clone session (console / "Start call"). Flip back to Fish to test cloning.
+class _PrewarmingFishTTS(fishaudio.TTS):
+    """fishaudio.TTS with a real prewarm(). The Agents framework calls tts.prewarm()
+    as the agent activity starts — before the greeting synthesis — but the fishaudio
+    plugin inherits the base no-op, so the first utterance pays DNS + TCP + TLS to
+    api.fish.audio. This shim fires a throwaway request through the plugin's own
+    aiohttp session so the connection setup happens during session start instead.
+    (isinstance(tts, fishaudio.TTS) checks elsewhere still pass — it's a subclass.)
+    """
+
+    def prewarm(self) -> None:
+        async def _warm() -> None:
+            try:
+                # _ensure_session is the plugin's private session factory; guard it so
+                # a fork/upstream rename degrades to "no prewarm", never a crash.
+                async with self._ensure_session().head(
+                    FISH_BASE_URL, allow_redirects=False
+                ):
+                    pass
+            except Exception:
+                logger.debug("fish TTS prewarm request failed", exc_info=True)
+
+        self._demo_prewarm_task = asyncio.create_task(_warm())
+
+
+def build_tts(voice_id: str):
+    provider = os.getenv("TTS_PROVIDER", "fish").strip().lower()
+    if provider == "cartesia":
+        # Default Cartesia voice/model; the expressive markup is converted to Cartesia
+        # SSML by the same fork pipeline that handles Fish (see _provider_format).
+        logger.info("TTS provider: cartesia (crackle A/B)")
+        return cartesia.TTS(
+            model="sonic-3",
+            voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        )
+    logger.info("TTS provider: fishaudio")
+    return _PrewarmingFishTTS(
+        model="s2.1-pro",
+        voice_id=voice_id,
+        latency_mode="low",
+        # PCM, not the default WAV. Switching off the WAV container REDUCED the
+        # first-word "crackle" over WebRTC with token-streamed generate_reply (a
+        # single continuous session.say never crackled), but did NOT eliminate it —
+        # a residual intermittent first-utterance crackle still reproduces on this
+        # raw-PCM path, which is what the Cartesia A/B above is investigating. See
+        # the upstream investigation in livekit/agents.
+        output_format="pcm",
+    )
 
 
 class Assistant(Agent):
@@ -348,26 +468,19 @@ class Assistant(Agent):
         # Recent mood labels fed back into the classifier so it varies its word choice
         # turn to turn instead of getting stuck on one (e.g. "playful").
         self._recent_moods: list[str] = []
-        self._cloned_voice_id: str | None = None
+        # Temporary Fish models built for this session (clone and/or designed voice);
+        # all deleted by the shutdown callback.
+        self._ephemeral_voice_ids: list[str] = []
         self._cloned: bool = False
         self._job_ctx: JobContext | None = None
         self._capture: PassthroughCaptureAudioInput | None = None
-        self._cumulative_speech_secs: float = 0.0
-        self._speech_started_at: float | None = None
-        # While the user is reading the clone script we suppress agent replies
-        # (on_user_turn_completed raises StopResponse) so it doesn't talk over them.
-        self._reading_script: bool = False
-        # Set once the user has read enough of the script to clone.
-        self._capture_target_reached: asyncio.Event = asyncio.Event()
-        # Live STT of the script read, published as `clone.heard` to drive the
-        # word-highlighting in the read card. `_final` accumulates finalized
-        # segments; `_interim` is the in-progress one.
-        self._heard_final: str = ""
-        self._heard_interim: str = ""
-        self._last_heard_pub: float = 0.0
+        # While the user reads the clone script (or the designed voice is building)
+        # we suppress agent replies (on_user_turn_completed raises StopResponse) so
+        # the setup flow drives all speech.
+        self._suppress_replies: bool = False
         # Non-destructive attribute writes: the rtc `set_attributes` clobbers keys
         # you don't pass, so we re-send our own attrs + the live `lk.agent.state`
-        # on every write. Without this, frequent `clone.heard` writes race the SDK's
+        # on every write. Without this, our clone/design/style writes race the SDK's
         # own state writes and can drop `lk.agent.state`, which trips the frontend's
         # "agent did not finish initializing" failure. `_agent_state` is kept fresh
         # from `agent_state_changed` (wired in `my_agent`).
@@ -418,6 +531,10 @@ class Assistant(Agent):
     async def _set_clone_state(self, state: str) -> None:
         await self._set_clone_attrs(state=state)
 
+    async def _set_design_state(self, state: str) -> None:
+        """Push the `design.state` attribute that drives the on-screen design card."""
+        await self._push_attrs({"design.state": state})
+
     def _on_agent_state_changed(self, ev) -> None:
         """Keep our cached `lk.agent.state` fresh so non-destructive attr writes
         always re-assert the correct value."""
@@ -434,22 +551,22 @@ class Assistant(Agent):
     async def on_user_turn_completed(
         self, turn_ctx: ChatContext, new_message: ChatMessage
     ) -> None:
-        """While the user is reading the clone script, suppress the agent's reply so
-        it doesn't talk over them — the clone-first controller drives all speech in
-        that window. Once cloning is done (or in a normal session) this is a no-op."""
-        if self._reading_script:
+        """While the user is reading the clone script (or the designed voice is still
+        building), suppress the agent's reply so it doesn't talk over the setup flow —
+        the controller drives all speech in that window. Otherwise a no-op."""
+        if self._suppress_replies:
             raise StopResponse()
 
     async def on_user_turn_exceeded(self, ev) -> None:
         """Default behavior cuts in with a reply when the user speaks too long; while
         reading the (long) clone script we must stay silent, so skip it then."""
-        if self._reading_script:
+        if self._suppress_replies:
             return
         await super().on_user_turn_exceeded(ev)
 
     def install_capture(self, session: AgentSession) -> None:
-        """Tee session.input.audio so we silently buffer the user's voice, and track
-        cumulative speech so the clone-first flow knows when enough has been read."""
+        """Tee session.input.audio so we silently buffer the user's voice while they
+        speak. The tee's buffered_secs is the "did they read enough" signal."""
         original = session.input.audio
         if original is None:
             logger.warning("session has no audio input; voice-clone capture disabled")
@@ -459,38 +576,7 @@ class Assistant(Agent):
         self._capture = tee
 
         def _on_user_state_changed(ev) -> None:
-            if ev.new_state == "speaking":
-                self._speech_started_at = ev.created_at
-                tee.recording = True
-                return
-
-            tee.recording = False
-            if self._speech_started_at is not None:
-                delta = ev.created_at - self._speech_started_at
-                if delta > 0:
-                    self._cumulative_speech_secs += delta
-                self._speech_started_at = None
-
-            if (
-                not self._capture_target_reached.is_set()
-                and self._cumulative_speech_secs >= CLONE_SCRIPT_TARGET_SECS
-            ):
-                logger.info(
-                    "clone-script read target reached (~%.1fs cumulative, %.1fs buffered)",
-                    self._cumulative_speech_secs,
-                    tee.buffered_secs,
-                )
-                self._capture_target_reached.set()
-
-            # Push the updated capture-seconds attribute so the frontend read meter
-            # advances. Cheap: one attribute write per user-turn boundary.
-            task = asyncio.create_task(
-                self._set_clone_attrs(
-                    capture_secs=f"{self._cumulative_speech_secs:.2f}"
-                )
-            )
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._bg_tasks.discard)
+            tee.recording = ev.new_state == "speaking"
 
         session.on("user_state_changed", _on_user_state_changed)
 
@@ -526,71 +612,51 @@ class Assistant(Agent):
 
     async def run_clone_first(self, session: AgentSession, ctx: JobContext) -> None:
         """Clone-first session flow: prompt the user to read the on-screen script,
-        capture ~15s of it, build the clone, switch the TTS into it, and only then
-        kick off the real (expressive) conversation. Falls back to the starting preset
-        voice if the user reads too little or the clone fails.
+        capture a fixed CLONE_READ_SECS window of it, build the clone, switch the TTS
+        into it, and only then kick off the real (expressive) conversation. Falls back
+        to the starting preset voice if too little was captured or the clone fails.
 
         All speech in the read/clone window is driven from here; user turns are
-        suppressed via `_reading_script` so the agent doesn't talk over the reading."""
+        suppressed via `_suppress_replies` so the agent doesn't talk over the reading."""
         self.install_capture(session)
-        self._reading_script = True
-        self._heard_final = ""
-        self._heard_interim = ""
-        self._last_heard_pub = 0.0
+        self._suppress_replies = True
 
-        # Stream the user's live STT into `clone.heard` so the read card can
-        # highlight words as they're spoken. Throttled to ~4 Hz (always on final).
-        def _on_user_transcript(ev) -> None:
-            if not self._reading_script:
-                return
-            if ev.is_final:
-                self._heard_final = f"{self._heard_final} {ev.transcript}".strip()
-                self._heard_interim = ""
-            else:
-                self._heard_interim = ev.transcript
-            now = time.monotonic()
-            if ev.is_final or now - self._last_heard_pub >= 0.35:
-                self._last_heard_pub = now
-                heard = f"{self._heard_final} {self._heard_interim}".strip()
-                t = asyncio.create_task(self._set_clone_attrs(heard=heard))
-                self._bg_tasks.add(t)
-                t.add_done_callback(self._bg_tasks.discard)
-
-        session.on("user_input_transcribed", _on_user_transcript)
-
-        # Publish the script + reset highlight state for the on-screen card, then
-        # connect so the mic is live, then prompt the read (in the starting preset voice).
-        await self._set_clone_attrs(script=CLONE_SCRIPT, heard="", capture_secs="0.00")
+        # Publish the script for the on-screen card, connect so the mic is live, then
+        # prompt the read (in the starting preset voice) and let it finish playing.
+        await self._set_clone_attrs(
+            script=CLONE_SCRIPT, read_secs=f"{CLONE_READ_SECS:.0f}"
+        )
         await self._set_clone_state("prompt")
         await ctx.connect()
+        prompt = None
         with contextlib.suppress(RuntimeError):
-            session.say(
+            prompt = session.say(
                 CLONE_PROMPT_LINE, add_to_chat_ctx=False, allow_interruptions=False
             )
+        if prompt is not None:
+            with contextlib.suppress(Exception):
+                await prompt.wait_for_playout()
 
-        # Wait for enough of the script to be read (or time out).
-        try:
-            await asyncio.wait_for(
-                self._capture_target_reached.wait(), timeout=CLONE_SCRIPT_TIMEOUT_SECS
-            )
-        except asyncio.TimeoutError:
-            logger.info(
-                "clone-script read timed out at ~%.1fs cumulative speech",
-                self._cumulative_speech_secs,
-            )
+        # Fixed read window. The frontend starts its countdown when it sees state
+        # flip to "reading"; when the window ends we clone whatever was captured.
+        # (The capture tee buffers whenever the user is speaking — installed before
+        # connect — so anyone who started reading during the prompt line is captured.)
+        await self._set_clone_state("reading")
+        await asyncio.sleep(CLONE_READ_SECS)
+
+        captured_secs = self._capture.buffered_secs if self._capture else 0.0
+        logger.info(
+            "clone read window closed (%.1fs of speech captured)", captured_secs
+        )
 
         # Under-read / no audio → fall back to the starting preset voice.
-        if (
-            self._capture is None
-            or not self._capture.frames
-            or self._cumulative_speech_secs < CLONE_MIN_SECS
-        ):
+        if self._capture is None or captured_secs < CLONE_MIN_SECS:
             logger.warning(
-                "clone-first under-read (~%.1fs); falling back to preset voice",
-                self._cumulative_speech_secs,
+                "clone-first under-read (%.1fs); falling back to preset voice",
+                captured_secs,
             )
             await self._set_clone_state("idle")
-            self._reading_script = False
+            self._suppress_replies = False
             self._safe_generate_reply(session, CLONE_FALLBACK_GREETING)
             return
 
@@ -616,7 +682,7 @@ class Assistant(Agent):
         except Exception as e:
             logger.exception("clone-first upload failed; falling back to preset voice")
             await self._set_clone_state("idle")
-            self._reading_script = False
+            self._suppress_replies = False
             if ack is not None:
                 with contextlib.suppress(Exception):
                     await ack.wait_for_playout()
@@ -626,7 +692,7 @@ class Assistant(Agent):
             )
             return
 
-        self._cloned_voice_id = model_id
+        self._ephemeral_voice_ids.append(model_id)
         await self._set_clone_state("ready")
 
         # Let the ack finish in the starting voice before the cloned-voice reveal.
@@ -645,8 +711,65 @@ class Assistant(Agent):
         self._cloned = True
         await self.update_instructions(build_instructions(cloned=True))
         # Stop suppressing replies and reveal the clone — first line is in their voice.
-        self._reading_script = False
+        self._suppress_replies = False
         self._safe_generate_reply(session, CLONE_REVEAL_GREETING)
+
+    async def run_design_first(
+        self,
+        session: AgentSession,
+        ctx: JobContext,
+        design_task: "asyncio.Task[str]",
+        instruction: str,
+    ) -> None:
+        """Design-first session flow: the voice build (`design_task`, kicked off at
+        job start so it overlaps session/room setup) runs while an LLM-generated ack
+        (a light comment on the user's description) plays in the starting preset
+        voice; when the model is ready we switch the TTS into it and greet in the
+        designed voice. Falls back to the preset voice on failure.
+
+        Replies are suppressed until the swap so a user who talks during the build
+        doesn't trigger a reply in the wrong (preset) voice."""
+        self._suppress_replies = True
+        await self._set_design_state("designing")
+        await ctx.connect()
+        ack = None
+        with contextlib.suppress(RuntimeError):
+            ack = session.generate_reply(
+                instructions=design_ack_instructions(instruction),
+                allow_interruptions=False,
+            )
+
+        try:
+            model_id = await asyncio.wait_for(design_task, timeout=DESIGN_TIMEOUT_SECS)
+        except Exception:
+            logger.exception("voice design failed; falling back to preset voice")
+            await self._set_design_state("failed")
+            self._suppress_replies = False
+            if ack is not None:
+                with contextlib.suppress(Exception):
+                    await ack.wait_for_playout()
+            self._safe_generate_reply(session, DESIGN_FALLBACK_GREETING)
+            return
+
+        # (The model id is recorded for shutdown cleanup by the done-callback wired
+        # in my_agent, so it's deleted even if this coroutine dies before here.)
+
+        # Let the ack finish in the starting voice before the designed-voice reveal.
+        if ack is not None:
+            with contextlib.suppress(Exception):
+                await ack.wait_for_playout()
+
+        tts = session.tts
+        if isinstance(tts, fishaudio.TTS):
+            tts.update_options(voice_id=model_id)
+            logger.info("switched TTS to designed voice id=%s", model_id)
+        else:
+            logger.warning("session TTS is not Fish Audio; cannot switch to design")
+
+        await self._set_design_state("ready")
+        await self.update_instructions(build_instructions(designed=True))
+        self._suppress_replies = False
+        self._safe_generate_reply(session, DESIGN_REVEAL_GREETING)
 
     async def apply_mode(self, session: AgentSession, mode: str) -> None:
         """Switch the speaking register, driven by the user's on-screen toggle.
@@ -668,7 +791,7 @@ class Assistant(Agent):
         self.update_expressive(_expressive_for(mode))
         await self._set_style_attrs(mode=mode)
         logger.info("mode switched -> %s", mode)
-        if not changed or self._reading_script:
+        if not changed or self._suppress_replies:
             return
         # Cut off whatever the agent is currently saying so the new tone lands right
         # away. interrupt() is a no-op when nothing is speaking; force so an in-progress
@@ -697,8 +820,8 @@ class Assistant(Agent):
     def _schedule_mood(self, raw_text: str) -> None:
         """(Re)launch mood classification for a freshly spoken line. Only the latest
         line matters, so any still-running classification is cancelled. No-ops during
-        the clone-script read."""
-        if self._reading_script:
+        the clone/design setup window."""
+        if self._suppress_replies:
             return
         text = _MARKUP_RE.sub("", raw_text or "").strip()
         if not text:
@@ -823,12 +946,26 @@ async def my_agent(ctx: JobContext):
     start_voice = (
         requested_voice if requested_voice in PRESET_VOICES else DEFAULT_VOICE_ID
     )
+    design_instruction = meta.get("design")
+    if isinstance(design_instruction, str):
+        design_instruction = design_instruction.strip()[:DESIGN_INSTRUCTION_MAX_CHARS]
+    if not design_instruction or want_clone:
+        design_instruction = None
     logger.info(
-        "session config: clone=%s start_voice=%s (requested=%s)",
+        "session config: clone=%s design=%s start_voice=%s (requested=%s)",
         want_clone,
+        bool(design_instruction),
         start_voice,
         requested_voice,
     )
+
+    # Kick off the voice design NOW — the API round trips (design + create-model)
+    # overlap the whole session/room setup instead of starting after connect.
+    design_task: asyncio.Task[str] | None = None
+    if design_instruction:
+        design_task = asyncio.create_task(
+            create_designed_voice(os.environ["FISH_API_KEY"], design_instruction)
+        )
 
     session = AgentSession(
         # Aggressive end-of-turn: lean on AssemblyAI's semantic endpoint to fire
@@ -839,18 +976,9 @@ async def my_agent(ctx: JobContext):
             min_turn_silence=160,
             max_turn_silence=1500,
         ),
-        tts=fishaudio.TTS(
-            model="s2.1-pro",
-            voice_id=start_voice,
-            latency_mode="low",
-            # PCM, not the default WAV. With streamed LLM output, the WAV-container
-            # decode path produces an audible first-word "crackle" over WebRTC that
-            # the raw-PCM path doesn't (a single continuous session.say never
-            # crackles, only token-streamed generate_reply). Fish's bytes are clean
-            # either way — raw PCM just avoids the container/decode path. See the
-            # upstream investigation in livekit/agents.
-            output_format="pcm",
-        ),
+        # TTS provider is env-selectable for the crackle A/B (see build_tts):
+        # Fish Audio by default, Cartesia when TTS_PROVIDER=cartesia.
+        tts=build_tts(start_voice),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.
         vad=ctx.proc.userdata["vad"],
@@ -858,25 +986,36 @@ async def my_agent(ctx: JobContext):
         # ceiling so the agent never hangs waiting on an unconfident endpoint.
         min_endpointing_delay=0.0,
         max_endpointing_delay=1.5,
-        # preemptive_generation is intentionally OFF. It starts generating the reply
-        # while the user is still talking — before on_user_turn_completed runs — so the
-        # StopResponse we raise there to stay silent during the clone-script read would
-        # land too late to suppress the reply. Keep it off so the gate is reliable.
+        # preemptive_generation starts generating the reply while the user is still
+        # talking — before on_user_turn_completed runs — so the StopResponse gate we
+        # rely on during the clone read / design build would land too late to suppress
+        # the reply. Enable it ONLY for plain preset sessions (which never suppress);
+        # there it shaves the LLM+TTS head start off every turn's response latency.
+        preemptive_generation=not want_clone and design_task is None,
     )
 
     assistant = Assistant()
     assistant._job_ctx = ctx
 
-    async def _cleanup_cloned_voice(_reason: str) -> None:
-        model_id = assistant._cloned_voice_id
-        if model_id is None:
-            return
+    # Record the designed model id for shutdown cleanup the moment the build task
+    # finishes — even if the session dies before run_design_first can use it.
+    if design_task is not None:
+
+        def _record_design_model(t: "asyncio.Task[str]") -> None:
+            if t.cancelled() or t.exception() is not None:
+                return
+            assistant._ephemeral_voice_ids.append(t.result())
+
+        design_task.add_done_callback(_record_design_model)
+
+    async def _cleanup_ephemeral_voices(_reason: str) -> None:
         api_key = os.environ.get("FISH_API_KEY")
         if not api_key:
             return
-        await delete_voice_clone(api_key, model_id)
+        for model_id in assistant._ephemeral_voice_ids:
+            await delete_voice_clone(api_key, model_id)
 
-    ctx.add_shutdown_callback(_cleanup_cloned_voice)
+    ctx.add_shutdown_callback(_cleanup_ephemeral_voices)
 
     # Start the session, which initializes the voice pipeline and warms up the models.
     await session.start(
@@ -949,6 +1088,10 @@ async def my_agent(ctx: JobContext):
         # Clone-first: read the script, clone, switch voice, then converse. Connects
         # to the room itself (the mic must be live while the user reads).
         await assistant.run_clone_first(session, ctx)
+    elif design_task is not None:
+        # Design-first: the voice build (already running) finishes behind a short
+        # ack, then the TTS swaps into the designed voice for the greeting.
+        await assistant.run_design_first(session, ctx, design_task, design_instruction)
     else:
         # Preset voice: open straight into the expressive conversation.
         session.generate_reply(instructions=PRESET_GREETING)

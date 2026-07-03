@@ -39,6 +39,12 @@ export const PRESET_VOICES: PresetVoice[] = [
 /** Sentinel selection value meaning "clone my own voice" rather than a preset id. */
 export const CLONE_SELECTION = 'clone' as const;
 
+/** Sentinel selection value meaning "design a voice from a text description". */
+export const DESIGN_SELECTION = 'design' as const;
+
+/** Max characters accepted for a voice-design description (Fish's API caps it at 2000). */
+export const DESIGN_INSTRUCTION_MAX_CHARS = 2000;
+
 /** Default landing-page selection — the first preset (Maren, American female). */
 export const DEFAULT_VOICE_ID = PRESET_VOICES[0].id;
 

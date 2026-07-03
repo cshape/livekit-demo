@@ -1,16 +1,23 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MicrophoneIcon, PauseIcon, PlayIcon } from '@phosphor-icons/react/dist/ssr';
-import { CLONE_SELECTION, PRESET_VOICES } from '@/app-config';
+import { MicrophoneIcon, PauseIcon, PlayIcon, SparkleIcon } from '@phosphor-icons/react/dist/ssr';
+import { CLONE_SELECTION, DESIGN_SELECTION, PRESET_VOICES } from '@/app-config';
 import { cn } from '@/lib/shadcn/utils';
 
 interface VoicePickerProps {
   selection: string;
   onSelectionChange: (selection: string) => void;
+  designInstruction: string;
+  onDesignInstructionChange: (value: string) => void;
 }
 
-export function VoicePicker({ selection, onSelectionChange }: VoicePickerProps) {
+export function VoicePicker({
+  selection,
+  onSelectionChange,
+  designInstruction,
+  onDesignInstructionChange,
+}: VoicePickerProps) {
   // One shared audio element; previewing a voice stops any other preview.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -141,6 +148,63 @@ export function VoicePicker({ selection, onSelectionChange }: VoicePickerProps) 
           )}
           aria-hidden="true"
         />
+      </div>
+
+      <div
+        role="radio"
+        aria-checked={selection === DESIGN_SELECTION}
+        tabIndex={0}
+        onClick={() => onSelectionChange(DESIGN_SELECTION)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelectionChange(DESIGN_SELECTION);
+          }
+        }}
+        className={cn(
+          'flex cursor-pointer flex-col rounded-xl border px-4 py-3 text-left transition-colors',
+          'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
+          selection === DESIGN_SELECTION
+            ? 'border-primary bg-primary/5 ring-primary/40 ring-1'
+            : 'border-border hover:border-foreground/30 hover:bg-muted/40'
+        )}
+      >
+        <div className="flex items-center gap-3">
+          <span className="border-border text-foreground/70 flex size-9 shrink-0 items-center justify-center rounded-full border">
+            <SparkleIcon weight="fill" className="size-4" />
+          </span>
+          <span className="flex flex-col">
+            <span className="text-foreground text-sm font-medium">Design a voice</span>
+            <span className="text-muted-foreground text-xs">
+              Describe a voice in words &mdash; it&rsquo;s built on the spot
+            </span>
+          </span>
+          <span
+            className={cn(
+              'ml-auto size-2.5 rounded-full transition-colors',
+              selection === DESIGN_SELECTION ? 'bg-primary' : 'bg-transparent'
+            )}
+            aria-hidden="true"
+          />
+        </div>
+        {selection === DESIGN_SELECTION && (
+          <textarea
+            autoFocus
+            value={designInstruction}
+            onChange={(e) => onDesignInstructionChange(e.target.value)}
+            // The parent card is the radio: don't let clicks/keys inside the
+            // textarea re-trigger its select handlers (space/enter must type).
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            rows={2}
+            maxLength={500}
+            placeholder="e.g. energetic young presenter, bright tone, crisp diction, friendly but not cartoonish"
+            className={cn(
+              'border-border bg-background placeholder:text-muted-foreground/60 mt-3 w-full resize-none rounded-lg border px-3 py-2 text-sm',
+              'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none'
+            )}
+          />
+        )}
       </div>
     </div>
   );

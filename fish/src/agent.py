@@ -22,11 +22,10 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, cartesia, fishaudio, silero
+from livekit.plugins import assemblyai, fishaudio, silero
 
 from llm import build_llm, build_mood_client
 from voice_clone import (
-    FISH_BASE_URL,
     PassthroughCaptureAudioInput,
     create_designed_voice,
     create_voice_clone,
@@ -374,70 +373,22 @@ DESIGN_FALLBACK_GREETING = (
 )
 
 
-# --- TTS provider selection (temporary, for the crackle A/B) -----------------
-# The default is Fish Audio (the demo's hero). TTS_PROVIDER=cartesia swaps in
-# Cartesia so we can check whether the intermittent first-utterance crackle over
-# WebRTC is specific to Fish (its s2.1-pro output, or the fishaudio plugin's PCM
-# framing) or lives in the shared token-streamed generate_reply -> agents ->
-# WebRTC path.
-#
-# NOTE: this is NOT a PCM-vs-container test. Fish already runs output_format="pcm"
-# (24kHz s16le) and STILL crackled in repro. Cartesia also streams raw PCM s16le @
-# 24kHz, so BOTH feed the identical downstream (agents resample 24k->48k -> Opus ->
-# WebRTC); the only variables left are the vendor's actual first samples and each
-# plugin's chunk framing. So: Cartesia crackles too -> shared path (resampler /
-# Opus encoder / output priming); Cartesia clean -> Fish-specific.
-#
-# NOTE while on Cartesia: the clone-first flow (fishaudio.TTS.update_options) is a
-# no-op — it isinstance-checks for fishaudio.TTS and just logs a warning, staying in
-# the Cartesia preset voice. That's fine for the crackle repro, which is a preset,
-# non-clone session (console / "Start call"). Flip back to Fish to test cloning.
-class _PrewarmingFishTTS(fishaudio.TTS):
-    """fishaudio.TTS with a real prewarm(). The Agents framework calls tts.prewarm()
-    as the agent activity starts — before the greeting synthesis — but the fishaudio
-    plugin inherits the base no-op, so the first utterance pays DNS + TCP + TLS to
-    api.fish.audio. This shim fires a throwaway request through the plugin's own
-    aiohttp session so the connection setup happens during session start instead.
-    (isinstance(tts, fishaudio.TTS) checks elsewhere still pass — it's a subclass.)
-    """
-
-    def prewarm(self) -> None:
-        async def _warm() -> None:
-            try:
-                # _ensure_session is the plugin's private session factory; guard it so
-                # a fork/upstream rename degrades to "no prewarm", never a crash.
-                async with self._ensure_session().head(
-                    FISH_BASE_URL, allow_redirects=False
-                ):
-                    pass
-            except Exception:
-                logger.debug("fish TTS prewarm request failed", exc_info=True)
-
-        self._demo_prewarm_task = asyncio.create_task(_warm())
-
-
 def build_tts(voice_id: str):
-    provider = os.getenv("TTS_PROVIDER", "fish").strip().lower()
-    if provider == "cartesia":
-        # Default Cartesia voice/model; the expressive markup is converted to Cartesia
-        # SSML by the same fork pipeline that handles Fish (see _provider_format).
-        logger.info("TTS provider: cartesia (crackle A/B)")
-        return cartesia.TTS(
-            model="sonic-3",
-            voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
-        )
-    logger.info("TTS provider: fishaudio")
-    return _PrewarmingFishTTS(
+    return fishaudio.TTS(
         model="s2.1-pro",
         voice_id=voice_id,
         latency_mode="low",
-        # PCM, not the default WAV. Switching off the WAV container REDUCED the
-        # first-word "crackle" over WebRTC with token-streamed generate_reply (a
-        # single continuous session.say never crackled), but did NOT eliminate it —
-        # a residual intermittent first-utterance crackle still reproduces on this
-        # raw-PCM path, which is what the Cartesia A/B above is investigating. See
-        # the upstream investigation in livekit/agents.
+        # PCM, not the default WAV — avoids the WAV-container decode path.
         output_format="pcm",
+        # Startup prebuffer: wait for Fish's second chunk before starting playout, so
+        # the buffer doesn't underrun in the ~250ms gap after its small (~460ms) first
+        # chunk — that underrun is what caused the intermittent first-utterance crackle
+        # over WebRTC. A client-side STOPGAP for Fish's bursty cold-start pacing until
+        # server-side chunk delivery is smoother. The plugin also reuses one
+        # /v1/tts/live socket per session and pre-warms it via the framework's
+        # prewarm() hook, so the first reply skips the ~330ms websocket handshake.
+        # Default is already 2; set explicitly to document the intent.
+        prebuffer_chunks=2,
     )
 
 
@@ -976,8 +927,6 @@ async def my_agent(ctx: JobContext):
             min_turn_silence=160,
             max_turn_silence=1500,
         ),
-        # TTS provider is env-selectable for the crackle A/B (see build_tts):
-        # Fish Audio by default, Cartesia when TTS_PROVIDER=cartesia.
         tts=build_tts(start_voice),
         # Turn detection falls back to silero VAD — keeps the agent footprint
         # small enough for Render's 512MB Starter worker.

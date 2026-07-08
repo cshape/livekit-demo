@@ -380,15 +380,14 @@ def build_tts(voice_id: str):
         latency_mode="low",
         # PCM, not the default WAV — avoids the WAV-container decode path.
         output_format="pcm",
-        # Startup prebuffer: wait for Fish's second chunk before starting playout, so
-        # the buffer doesn't underrun in the ~250ms gap after its small (~460ms) first
-        # chunk — that underrun is what caused the intermittent first-utterance crackle
-        # over WebRTC. A client-side STOPGAP for Fish's bursty cold-start pacing until
-        # server-side chunk delivery is smoother. The plugin also reuses one
-        # /v1/tts/live socket per session and pre-warms it via the framework's
-        # prewarm() hook, so the first reply skips the ~330ms websocket handshake.
-        # Default is already 2; set explicitly to document the intent.
-        prebuffer_chunks=2,
+        # No prebuffer/prewarm config here on purpose: the plugin handles both by
+        # default. It reuses one /v1/tts/live socket per session (pre-warmed via the
+        # framework's prewarm() hook, so the first reply skips the ~330ms handshake)
+        # and, by default (prebuffer_chunks=2), waits for Fish's second chunk before
+        # starting playout — a built-in stopgap for the cold-start underrun that
+        # caused the first-utterance crackle over WebRTC, until Fish's inference emits
+        # a smoother first/second chunk (then the plugin default flips to start on
+        # chunk 1).
     )
 
 

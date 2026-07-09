@@ -4,7 +4,7 @@
 # Cloud Agents (`lk agent`; see fish/livekit.toml, agent id CA_AGy6MPJtaKPR,
 # region us-east, dispatch name `fish-demo`). Render hosts just the web service,
 # which serves the landing page and the /api/token route that mints LiveKit
-# access tokens. The worker's provider secrets (Fish / AssemblyAI / OpenAI / the
+# access tokens. The worker's provider secrets (Fish / Deepgram / OpenAI / the
 # Gemma LLM) live as Cloud Agent secrets (`lk agent secrets`), not here.
 #
 # Setup (one time):

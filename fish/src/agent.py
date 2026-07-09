@@ -19,10 +19,11 @@ from livekit.agents import (
     JobProcess,
     RoomInputOptions,
     StopResponse,
+    TurnHandlingOptions,
     cli,
 )
 from livekit.agents.voice import presets
-from livekit.plugins import assemblyai, fishaudio, silero
+from livekit.plugins import deepgram, fishaudio, silero
 
 from llm import build_llm, build_mood_client
 from voice_clone import (
@@ -534,12 +535,12 @@ class Assistant(Agent):
         """Trim → upload the buffered frames to Fish, returning the new model_id.
         Pure network/CPU work with NO speaking.
 
-        We intentionally do NOT compute a reference transcript: AssemblyAI's
-        streaming STT runs at ~1x realtime, so transcribing ~15s of audio added
-        ~15-20s of latency and dominated the clone time (pushing the whole flow
-        past the frontend's agent-connect timeout). Fish clones fine from audio
-        alone with train_mode=fast, and skipping the transcript is also more
-        robust to mis-reads (no text/audio mismatch)."""
+        We intentionally do NOT compute a reference transcript: transcribing the
+        ~15s read at streaming (~1x realtime) speed added ~15-20s of latency and
+        dominated the clone time (pushing the whole flow past the frontend's
+        agent-connect timeout). Fish clones fine from audio alone with
+        train_mode=fast, and skipping the transcript is also more robust to
+        mis-reads (no text/audio mismatch)."""
         if vad_model is not None:
             try:
                 frames = await vad_trim_frames(vad_model, frames)
@@ -918,28 +919,49 @@ async def my_agent(ctx: JobContext):
         )
 
     session = AgentSession(
-        # Aggressive end-of-turn: lean on AssemblyAI's semantic endpoint to fire
-        # fast on confident pauses. min_turn_silence is the confident-end debounce,
-        # max_turn_silence the safety net for longer unconfident pauses.
-        stt=assemblyai.STT(
-            end_of_turn_confidence_threshold=0.4,
-            min_turn_silence=160,
-            max_turn_silence=1500,
+        # Deepgram Flux: a conversational STT model that does turn-taking itself
+        # (native EndOfTurn / EagerEndOfTurn events over /v2/listen), so the STT — not
+        # a separate turn-detector model or VAD — decides when the user is done.
+        # eot_threshold is the end-of-turn confidence needed to finish a turn;
+        # eot_timeout_ms forces a turn end after that much trailing silence;
+        # eager_eot_threshold is the lower confidence at which Flux fires an early
+        # "probably done" signal that drives preemptive generation (see turn_handling
+        # below). Values match the fish-bare-agent Flux setup.
+        stt=deepgram.STTv2(
+            model="flux-general-en",
+            eot_threshold=0.7,
+            eot_timeout_ms=3000,
+            eager_eot_threshold=0.5,
         ),
         tts=build_tts(start_voice),
-        # Turn detection falls back to silero VAD — keeps the agent footprint
-        # small enough for Render's 512MB Starter worker.
+        # VAD is kept only for interruption / barge-in handling now (Flux owns turn
+        # detection). Loaded once in prewarm and shared across thread jobs.
         vad=ctx.proc.userdata["vad"],
-        # Trust the STT's endpoint (no added floor); 1.5s is just a hard safety
-        # ceiling so the agent never hangs waiting on an unconfident endpoint.
-        min_endpointing_delay=0.0,
-        max_endpointing_delay=1.5,
-        # preemptive_generation starts generating the reply while the user is still
-        # talking — before on_user_turn_completed runs — so the StopResponse gate we
-        # rely on during the clone read / design build would land too late to suppress
-        # the reply. Enable it ONLY for plain preset sessions (which never suppress);
-        # there it shaves the LLM+TTS head start off every turn's response latency.
-        preemptive_generation=not want_clone and design_task is None,
+        turn_handling=TurnHandlingOptions(
+            # Let Flux's EndOfTurn drive turns instead of VAD or a turn-detector model.
+            turn_detection="stt",
+            # No added floor after Flux's end-of-speech (min_delay is additive in STT
+            # mode); Flux's own eot_threshold / eot_timeout_ms already gate the turn.
+            # max_delay stays at its 3.0s default, matching eot_timeout_ms so the SDK
+            # never terminates a turn ahead of Flux.
+            endpointing={"min_delay": 0.0},
+            # Preemptive generation, enabled for EVERY session. Flux's EagerEndOfTurn
+            # (eager_eot_threshold) emits a PREFLIGHT transcript while the user is likely
+            # still finishing; the SDK then speculatively runs BOTH the LLM and — because
+            # preemptive_tts is on — Fish TTS, buffering the audio. On the real EndOfTurn
+            # it just plays the already-synthesized reply, so time-to-first-audio is
+            # near-zero. preemptive_tts is what matches fish-bare-agent's latency (its
+            # engine also starts LLM+TTS on EagerEndOfTurn); without it only the LLM runs
+            # early and Fish's time-to-first-audio is still paid after the turn confirms.
+            # Safe for the clone/design flows: the speculative reply (audio included) is
+            # only PLAYED when the speech handle is scheduled, which happens AFTER
+            # on_user_turn_completed — so the StopResponse gate we raise there still
+            # suppresses it during the read/build window, and reads longer than
+            # max_speech_duration (10s) skip preemption entirely. The trade-off is wasted
+            # Fish synthesis when a speculative turn is abandoned (TurnResumed), which is
+            # the same bet bare-agent makes.
+            preemptive_generation={"enabled": True, "preemptive_tts": True},
+        ),
     )
 
     assistant = Assistant()

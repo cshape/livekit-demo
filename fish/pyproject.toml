@@ -9,8 +9,9 @@ description = "LiveKit Agents worker for the Fish Audio voice-cloning demo"
 requires-python = ">=3.10, <3.15"
 
 dependencies = [
-    "livekit-agents[assemblyai,openai,silero]>=1.6.0",
+    "livekit-agents[openai,silero]>=1.6.0",
     "livekit-plugins-fishaudio>=1.6.0",
+    "livekit-plugins-deepgram>=1.6.0",
     "python-dotenv",
 ]
 
@@ -27,12 +28,18 @@ dev = [
 constraint-dependencies = ["yarl<1.24"]
 
 # Expressive mode (LLM-driven prosody markup) isn't in a livekit-agents release yet —
-# it lives on Cale's fork. Pull both the core SDK and the Fish Audio plugin from the
-# `cale/expressive-fish` branch (the Fish provider wiring spans both packages).
+# it lives on Cale's fork. Pull the core SDK and the Fish Audio plugin from the
+# `cale/expressive-fish` branch (the Fish provider wiring spans both packages). The
+# Deepgram plugin is pinned to the SAME fork on purpose: the fork is at 1.6.2, and the
+# PyPI Deepgram plugin (which carries the Flux STTv2 we use) requires livekit-agents
+# >=1.6.4 — installing it from PyPI would bump the SDK off the fork and drop expressive
+# mode. The fork's own livekit-plugins-deepgram already includes STTv2, so it stays
+# version-locked to the SDK.
 # Track upstream progress at livekit/agents PR #6116 (tina/expressive-mode).
 [tool.uv.sources]
 livekit-agents = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-agents" }
 livekit-plugins-fishaudio = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-fishaudio" }
+livekit-plugins-deepgram = { git = "https://github.com/cshape/agents-expressive.git", branch = "cale/expressive-fish", subdirectory = "livekit-plugins/livekit-plugins-deepgram" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

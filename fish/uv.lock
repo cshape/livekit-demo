@@ -556,7 +556,8 @@ name = "fish-voice-clone-agent"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "livekit-agents", extra = ["assemblyai", "openai", "silero"] },
+    { name = "livekit-agents", extra = ["openai", "silero"] },
+    { name = "livekit-plugins-deepgram" },
     { name = "livekit-plugins-fishaudio" },
     { name = "python-dotenv" },
 ]
@@ -570,7 +571,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "livekit-agents", extras = ["assemblyai", "openai", "silero"], git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-agents&branch=cale%2Fexpressive-fish" },
+    { name = "livekit-agents", extras = ["openai", "silero"], git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-agents&branch=cale%2Fexpressive-fish" },
+    { name = "livekit-plugins-deepgram", git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-deepgram&branch=cale%2Fexpressive-fish" },
     { name = "livekit-plugins-fishaudio", git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-fishaudio&branch=cale%2Fexpressive-fish" },
     { name = "python-dotenv" },
 ]
@@ -1022,9 +1024,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-assemblyai = [
-    { name = "livekit-plugins-assemblyai" },
-]
 codecs = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -1126,11 +1125,14 @@ wheels = [
 ]
 
 [[package]]
-name = "livekit-plugins-assemblyai"
+name = "livekit-plugins-deepgram"
 version = "1.6.2"
-source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-assemblyai&branch=cale%2Fexpressive-fish#047f059c26ac74e85490d3d7d94aae434a256bba" }
+source = { git = "https://github.com/cshape/agents-expressive.git?subdirectory=livekit-plugins%2Flivekit-plugins-deepgram&branch=cale%2Fexpressive-fish#047f059c26ac74e85490d3d7d94aae434a256bba" }
 dependencies = [
-    { name = "livekit-agents" },
+    { name = "livekit-agents", extra = ["codecs"] },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [[package]]

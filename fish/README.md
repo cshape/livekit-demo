@@ -15,10 +15,10 @@ This directory is self-contained — you can run it on its own and point any
 
 ## Stack
 
-- **STT** — AssemblyAI `universal-streaming-english` (`livekit-plugins-assemblyai`)
+- **STT + turn detection** — Deepgram Flux `flux-general-en` (`livekit-plugins-deepgram`, `deepgram.STTv2` on the `/v2/listen` API). Flux does turn-taking itself via native EndOfTurn / EagerEndOfTurn events (`turn_detection="stt"`); the EagerEndOfTurn signal drives preemptive generation.
 - **LLM** — OpenAI `gpt-5.1` (`livekit-plugins-openai`, your `OPENAI_API_KEY`); override the model with `OPENAI_MODEL`. A separate cosmetic mood classifier runs on `MOOD_MODEL` (default `gpt-4.1-mini`).
 - **TTS** — Fish Audio `s2.1-pro` (`livekit-plugins-fishaudio`)
-- **VAD / turn detection** — Silero VAD only (no separate turn-detector model, to keep the worker footprint small)
+- **VAD** — Silero VAD, kept only for interruption / barge-in handling (Flux owns turn detection)
 
 Per-session config (chosen voice / clone flag) arrives as agent dispatch
 metadata; the expressive mode/mood system and the clone-first flow (read a
@@ -61,7 +61,7 @@ LIVEKIT_URL=wss://<your-project>.livekit.cloud
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 
-ASSEMBLYAI_API_KEY=
+DEEPGRAM_API_KEY=
 OPENAI_API_KEY=
 FISH_API_KEY=
 ```

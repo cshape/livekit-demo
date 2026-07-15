@@ -57,10 +57,8 @@ export interface AppConfig {
   supportsScreenShare: boolean;
   isPreConnectBufferEnabled: boolean;
 
-  logo: string;
   startButtonText: string;
   accent?: string;
-  logoDark?: string;
   accentDark?: string;
 
   // agent dispatch configuration
@@ -74,15 +72,13 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   companyName: 'Fish Audio',
   pageTitle: 'Talk to an expressive voice agent — powered by Fish Audio',
   pageDescription:
-    "Talk to a LiveKit voice agent running Fish Audio's expressive TTS. Flip it between casual and professional mid-call and watch its mood shift in real time. You can also clone your own voice from a short scripted read; your recording and the clone are deleted when the call ends.",
+    "Talk to a voice agent running Fish Audio's expressive TTS. Flip it between casual and professional mid-call and watch its mood shift in real time. You can also clone your own voice from a short scripted read; your recording and the clone are deleted when the call ends.",
 
   supportsVideoInput: false,
   supportsScreenShare: false,
   isPreConnectBufferEnabled: false,
 
-  logo: '/lk-logo.svg',
   accent: '#002cf2',
-  logoDark: '/lk-logo-dark.svg',
   accentDark: '#1fd5f9',
   startButtonText: 'Start call',
 

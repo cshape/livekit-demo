@@ -27,11 +27,11 @@ export const WelcomeView = ({
     <div ref={ref}>
       <section className="bg-background mx-auto flex max-w-prose flex-col items-center justify-center px-6 py-10 text-center">
         <h1 className="text-foreground text-3xl leading-tight font-semibold tracking-tight md:text-4xl">
-          Hear LiveKit&rsquo;s expressive mode
+          Hear Fish Audio&rsquo;s expressive voices
         </h1>
 
         <p className="text-muted-foreground mt-4 max-w-prose text-base leading-relaxed text-pretty md:text-lg">
-          A LiveKit voice agent running Fish Audio&rsquo;s expressive text-to-speech. Flip it
+          A voice agent powered by Fish Audio&rsquo;s expressive text-to-speech. Flip it
           between <span className="text-foreground font-medium">casual</span> and{' '}
           <span className="text-foreground font-medium">professional</span> to change style. Pick a
           voice to start, clone your own, or design one from scratch.

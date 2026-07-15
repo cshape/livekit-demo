@@ -1,25 +1,12 @@
 import { headers } from 'next/headers';
 import { ImageResponse } from 'next/og';
-import getImageSize from 'buffer-image-size';
-import mime from 'mime';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { APP_CONFIG_DEFAULTS } from '@/app-config';
 import { getAppConfig } from '@/lib/utils';
 
-type Dimensions = {
-  width: number;
-  height: number;
-};
-
-type ImageData = {
-  base64: string;
-  dimensions: Dimensions;
-};
-
 // Image metadata
-export const alt = 'About Acme';
+export const alt = "Fish Audio expressive voice demo";
 export const size = {
   width: 1200,
   height: 628,
@@ -64,51 +51,15 @@ async function loadFileData(filePath: string): Promise<ArrayBuffer> {
   return await response.arrayBuffer();
 }
 
-async function getImageData(uri: string, fallbackUri?: string): Promise<ImageData> {
-  try {
-    const fileData = await loadFileData(uri);
-    const buffer = Buffer.from(fileData);
-    const mimeType = mime.getType(uri);
-
-    return {
-      base64: `data:${mimeType};base64,${buffer.toString('base64')}`,
-      dimensions: getImageSize(buffer),
-    };
-  } catch (e) {
-    if (fallbackUri) {
-      return getImageData(fallbackUri, fallbackUri);
-    }
-    throw e;
-  }
-}
-
-function scaleImageSize(size: { width: number; height: number }, desiredHeight: number) {
-  const scale = desiredHeight / size.height;
-  return {
-    width: size.width * scale,
-    height: desiredHeight,
-  };
-}
-
-function cleanPageTitle(appName: string) {
-  if (appName === APP_CONFIG_DEFAULTS.pageTitle) {
-    return 'Voice agent';
-  }
-
-  return appName;
-}
-
 export const contentType = 'image/png';
+
+// Waveform bar heights (px) — a stylized "expressive voice" mark.
+const WAVEFORM_BARS = [36, 84, 148, 108, 64];
 
 // Image generation
 export default async function Image() {
   const hdrs = await headers();
   const appConfig = await getAppConfig(hdrs);
-
-  const pageTitle = cleanPageTitle(appConfig.pageTitle);
-  const logoUri = appConfig.logoDark || appConfig.logo;
-  const isLogoUriLocal = logoUri.includes('lk-logo');
-  const wordmarkUri = logoUri === APP_CONFIG_DEFAULTS.logoDark ? 'public/lk-wordmark.svg' : logoUri;
 
   // Load fonts - use file system in dev, fetch in production
   let commitMonoData: ArrayBuffer | undefined;
@@ -122,103 +73,93 @@ export default async function Image() {
     // Continue without custom fonts - will fall back to system fonts
   }
 
-  // bg
-  const { base64: bgSrcBase64 } = await getImageData('public/opengraph-image-bg.png');
-
-  // wordmark
-  const { base64: wordmarkSrcBase64, dimensions: wordmarkDimensions } = isLogoUriLocal
-    ? await getImageData(wordmarkUri)
-    : await getImageData(logoUri);
-  const wordmarkSize = scaleImageSize(wordmarkDimensions, isLogoUriLocal ? 32 : 64);
-
-  // logo
-  const { base64: logoSrcBase64, dimensions: logoDimensions } = await getImageData(
-    logoUri,
-    'public/lk-logo-dark.svg'
-  );
-  const logoSize = scaleImageSize(logoDimensions, 24);
-
   return new ImageResponse(
     (
       // ImageResponse JSX element
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
           width: size.width,
           height: size.height,
-          backgroundImage: `url(${bgSrcBase64})`,
-          backgroundSize: '100% 100%',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
+          backgroundColor: '#0A0A0A',
+          backgroundImage: 'radial-gradient(circle at 75% 40%, #1c1c1c 0%, #0A0A0A 60%)',
         }}
       >
         {/* wordmark */}
         <div
           style={{
             position: 'absolute',
-            top: 30,
-            left: 30,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
+            top: 40,
+            left: 48,
+            fontSize: 28,
+            fontFamily: 'Everett',
+            color: 'white',
+            letterSpacing: 0.5,
           }}
         >
-          {/* eslint-disable-next-line jsx-a11y/alt-text */}
-          <img src={wordmarkSrcBase64} width={wordmarkSize.width} height={wordmarkSize.height} />
+          {appConfig.companyName}
         </div>
-        {/* logo */}
+        {/* waveform mark */}
         <div
           style={{
             position: 'absolute',
-            top: 200,
-            left: 460,
+            top: 160,
+            right: 140,
+            height: 160,
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 18,
           }}
         >
-          {/* eslint-disable-next-line jsx-a11y/alt-text */}
-          <img src={logoSrcBase64} width={logoSize.width} height={logoSize.height} />
+          {WAVEFORM_BARS.map((h, i) => (
+            <div
+              key={i}
+              style={{
+                width: 34,
+                height: h,
+                borderRadius: 17,
+                backgroundColor: 'white',
+              }}
+            />
+          ))}
         </div>
         {/* title */}
         <div
           style={{
             position: 'absolute',
-            bottom: 100,
-            left: 30,
-            width: '380px',
+            bottom: 90,
+            left: 48,
+            width: '560px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 16,
+            gap: 20,
           }}
         >
           <div
             style={{
+              alignSelf: 'flex-start',
               backgroundColor: '#1F1F1F',
-              padding: '2px 8px',
+              padding: '2px 10px',
               borderRadius: 4,
-              width: 72,
-              fontSize: 12,
+              fontSize: 13,
               fontFamily: 'CommitMono',
               fontWeight: 600,
               color: '#999999',
-              letterSpacing: 0.8,
+              letterSpacing: 1.2,
             }}
           >
-            SANDBOX
+            EXPRESSIVE VOICE DEMO
           </div>
           <div
             style={{
-              fontSize: 48,
+              fontSize: 52,
               fontWeight: 300,
               fontFamily: 'Everett',
               color: 'white',
-              lineHeight: 1,
+              lineHeight: 1.1,
             }}
           >
-            {pageTitle}
+            Talk to an expressive voice agent
           </div>
         </div>
       </div>

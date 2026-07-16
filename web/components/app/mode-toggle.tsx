@@ -8,17 +8,18 @@ import {
   useRoomContext,
   useVoiceAssistant,
 } from '@livekit/components-react';
+import { type UiStrings, useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 // The two speaking registers the user can flip between. Switching is user-driven:
 // we call the agent's `set_mode` RPC, which swaps its expressive preset and fires a
 // short demo line in the new voice. The agent echoes the applied register back via
 // the `style.mode` attribute, which we reconcile against (handles confirms + any
-// out-of-band change).
+// out-of-band change). RPC keys are locale-independent; only the labels localize.
 const MODES = [
-  { key: 'casual', label: 'Casual' },
-  { key: 'professional', label: 'Professional' },
-] as const;
+  { key: 'casual', labelKey: 'modeCasual' },
+  { key: 'professional', labelKey: 'modeProfessional' },
+] as const satisfies readonly { key: string; labelKey: keyof UiStrings }[];
 type ModeKey = (typeof MODES)[number]['key'];
 
 interface ModeToggleProps {
@@ -34,6 +35,7 @@ export function ModeToggle({ className }: ModeToggleProps) {
 }
 
 function ModeToggleInner({ agent, className }: { agent: RemoteParticipant; className?: string }) {
+  const strings = useStrings();
   const room = useRoomContext();
   const attrMode = useParticipantAttribute('style.mode', { participant: agent });
   const [mode, setMode] = useState<ModeKey>('casual');
@@ -92,7 +94,7 @@ function ModeToggleInner({ agent, className }: { agent: RemoteParticipant; class
                 className="bg-foreground absolute inset-0 -z-10 rounded-full"
               />
             )}
-            {m.label}
+            {strings[m.labelKey]}
           </button>
         );
       })}

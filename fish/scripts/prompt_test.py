@@ -66,7 +66,7 @@ def system_prompt(mode: str, mood: str | None) -> str:
         default=next(iter(presets._REGISTRY["fishaudio"].values())),
     )
     return (
-        agent.CORE_INSTRUCTIONS.strip()
+        agent.CORE_INSTRUCTIONS["en"].strip()
         + "\n\n"
         + str(opts["tts_instructions_template"])
     )

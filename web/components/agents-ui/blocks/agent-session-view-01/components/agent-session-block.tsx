@@ -13,6 +13,7 @@ import { CloneScriptCard } from '@/components/app/clone-script-card';
 import { DesignStatusCard } from '@/components/app/design-status-card';
 import { ModeToggle } from '@/components/app/mode-toggle';
 import { MoodIndicator } from '@/components/app/mood-indicator';
+import { useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 const MotionMessage = motion.create(Shimmer);
@@ -107,8 +108,7 @@ export function Fade({ top = false, bottom = false, className }: FadeProps) {
 export interface AgentSessionView_01Props {
   /**
    * Message shown above the controls before the first chat message is sent.
-   *
-   * @default 'Agent is listening, ask it a question'
+   * Defaults to the locale's "agent is listening" string.
    */
   preConnectMessage?: string;
   /**
@@ -135,7 +135,7 @@ export interface AgentSessionView_01Props {
 }
 
 export function AgentSessionView_01({
-  preConnectMessage = 'Agent is listening, ask it a question',
+  preConnectMessage,
   supportsVideoInput = false,
   supportsScreenShare = false,
   isPreConnectBufferEnabled = true,
@@ -143,6 +143,8 @@ export function AgentSessionView_01({
   className,
   ...props
 }: React.ComponentProps<'section'> & AgentSessionView_01Props) {
+  const strings = useStrings();
+  const preConnectText = preConnectMessage ?? strings.preConnectMessage;
   const session = useSessionContext();
   const { messages } = useSessionMessages(session);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -211,7 +213,7 @@ export function AgentSessionView_01({
                 {...SHIMMER_MOTION_PROPS}
                 className="pointer-events-none mx-auto block w-full max-w-2xl pb-4 text-center text-sm font-semibold"
               >
-                {preConnectMessage}
+                {preConnectText}
               </MotionMessage>
             )}
           </AnimatePresence>

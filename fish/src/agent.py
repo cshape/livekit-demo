@@ -48,18 +48,36 @@ AGENT_NAME = "fish-demo"
 # well above that — every buffered second is memory held while the upload builds.
 CAPTURE_MAX_SECS = 30.0
 
+# --- Localization -------------------------------------------------------------
+# The demo runs in English (default) or Japanese (the /jp landing page). The
+# frontend sends {"lang": "ja"} in the agent metadata; everything user-facing —
+# preset voices, STT model, system prompt, fixed spoken lines, greetings, mood
+# words — is keyed by this. Unknown/missing lang falls back to "en".
+SUPPORTED_LANGS = ("en", "ja")
+
 # --- Voice selection ---------------------------------------------------------
-# The 4 preset Fish Audio voices offered on the landing page. The frontend sends
-# the chosen voice_id in the agent metadata; we validate it against this set and
-# fall back to DEFAULT_VOICE_ID for anything unexpected (incl. clone sessions,
-# which start in this voice while the user reads the clone script).
-PRESET_VOICES: dict[str, str] = {
-    "0e24ff9936d34df4bddce26398cf1311": "Maren (American F)",
-    "747b05c0add940baa95270cf68c0cc2e": "Stellan (American M)",
-    "41db1fc3c3624332bec9997ff3d3d353": "Maeve (British F)",
-    "9a3a69c63dbc4774ac41b03945229dc8": "Alistair (British M)",
+# The preset Fish Audio voices offered on each landing page. The frontend sends
+# the chosen voice_id in the agent metadata; we validate it against the lang's
+# set and fall back to DEFAULT_VOICE_ID for anything unexpected (incl. clone
+# sessions, which start in this voice while the user reads the clone script).
+PRESET_VOICES: dict[str, dict[str, str]] = {
+    "en": {
+        "0e24ff9936d34df4bddce26398cf1311": "Maren (American F)",
+        "747b05c0add940baa95270cf68c0cc2e": "Stellan (American M)",
+        "41db1fc3c3624332bec9997ff3d3d353": "Maeve (British F)",
+        "9a3a69c63dbc4774ac41b03945229dc8": "Alistair (British M)",
+    },
+    "ja": {
+        "297a6fd278df47c3b9da9bfdf55ac89a": "さとる (Japanese M, narration)",
+        "88ee033403f24744965262d7369686e1": "まり (Japanese F, soft)",
+        "8d7ac3b4f8cc4f7cbe2f39887e8c5247": "丁寧な青年 (Japanese M, polite)",
+        "b2d9d8db057042688a5e318b8f405bc2": "きょうこ (Japanese F, support)",
+    },
 }
-DEFAULT_VOICE_ID = "0e24ff9936d34df4bddce26398cf1311"  # Maren (American F)
+DEFAULT_VOICE_ID: dict[str, str] = {
+    "en": "0e24ff9936d34df4bddce26398cf1311",  # Maren (American F)
+    "ja": "297a6fd278df47c3b9da9bfdf55ac89a",  # さとる (Japanese M)
+}
 
 # --- Clone-first flow --------------------------------------------------------
 # When the user picks "clone your voice" on the landing page, they read this
@@ -67,11 +85,18 @@ DEFAULT_VOICE_ID = "0e24ff9936d34df4bddce26398cf1311"  # Maren (American F)
 # their voice before the real conversation begins. ~50 words — more than fits in
 # the CLONE_READ_SECS window, so nobody runs out of script mid-countdown. No
 # bracket markers — the user reads it verbatim.
-CLONE_SCRIPT = (
-    "The quick morning light spread over the harbor as the boats headed out to sea. "
-    "Honestly, there's nothing like a fresh cup of coffee and a clear blue sky to get "
-    "the day going. I could talk about this stuff for hours — but let's hear how it sounds."
-)
+CLONE_SCRIPT: dict[str, str] = {
+    "en": (
+        "The quick morning light spread over the harbor as the boats headed out to sea. "
+        "Honestly, there's nothing like a fresh cup of coffee and a clear blue sky to get "
+        "the day going. I could talk about this stuff for hours — but let's hear how it sounds."
+    ),
+    "ja": (
+        "朝の光が港いっぱいに広がって、船が次々と海へ出ていきます。"
+        "やっぱり、淹れたてのコーヒーと青い空があれば、一日のはじまりは最高ですね。"
+        "こういう話なら何時間でもできますが、まずはどんな声になるか聞いてみましょう。"
+    ),
+}
 # Fixed read window: once the read prompt finishes playing we publish
 # clone.state="reading", wait exactly this long, and clone whatever was captured.
 # The frontend mirrors the same countdown on the script card. Purely time-based so
@@ -85,16 +110,29 @@ CLONE_MIN_SECS = 6.0
 # fixed lines use the SDK's abstract markup tags (not Fish's native brackets) so they
 # flow through the expressive pipeline: converted to Fish syntax for audio, stripped for
 # the transcript — same as model-authored text.
-CLONE_PROMPT_LINE = (
-    '<expression value="warm and reassuring"/> Before we get started, go ahead and read '
-    "the script on your screen out loud."
-)
+CLONE_PROMPT_LINE: dict[str, str] = {
+    "en": (
+        '<expression value="warm and reassuring"/> Before we get started, go ahead and read '
+        "the script on your screen out loud."
+    ),
+    "ja": (
+        '<expression value="warm and reassuring"/> それでは始める前に、'
+        "画面に表示されているスクリプトを声に出して読んでください。"
+    ),
+}
 # Spoken in the starting voice to fill the upload window while the clone builds.
-CLONE_BUILD_ACKS = [
-    '<expression value="excited"/> Perfect, that\'s plenty to work with — give me just a second to put your voice together.',
-    '<expression value="delighted"/> Great, I\'ve got what I need — hang tight just a moment while I build your clone.',
-    '<expression value="happy"/> Awesome, that\'s everything I need — one sec while I stitch your voice together.',
-]
+CLONE_BUILD_ACKS: dict[str, list[str]] = {
+    "en": [
+        '<expression value="excited"/> Perfect, that\'s plenty to work with — give me just a second to put your voice together.',
+        '<expression value="delighted"/> Great, I\'ve got what I need — hang tight just a moment while I build your clone.',
+        '<expression value="happy"/> Awesome, that\'s everything I need — one sec while I stitch your voice together.',
+    ],
+    "ja": [
+        '<expression value="excited"/> ばっちりです！あなたの声を作るので、ほんの少しだけ待っていてくださいね。',
+        '<expression value="delighted"/> いいですね、じゅうぶん録れました。今クローンを作っているので、少々お待ちください。',
+        '<expression value="happy"/> ありがとうございます！あとはお任せください。すぐにあなたの声をお届けします。',
+    ],
+}
 
 
 # --- TTS pronunciation -------------------------------------------------------
@@ -214,7 +252,8 @@ _PRESET_FOR_MODE = {
     "casual": presets.CASUAL,
 }
 
-CORE_INSTRUCTIONS = """
+CORE_INSTRUCTIONS: dict[str, str] = {
+    "en": """
 You are the voice of a live demo of Fish Audio's expressive text to speech. The whole point is to show off speech that sounds genuinely human and emotionally alive — so let real feeling into your delivery: react, vary your energy, and never sound flat or read-aloud.
 
 PERSONA: you're warm, quick-witted, and genuinely curious — the kind of voice that feels like a sharp friend who's easy to talk to. You have a light sense of humor and real opinions, you listen closely, and you make the person feel heard. You are never robotic and never a corporate script.
@@ -228,7 +267,25 @@ YOUR REGISTER CAN SHIFT: you speak in one of two registers — casual (relaxed, 
 PRONUNCIATION: the brand is "Fish Audio" (two words) — write it that way whenever you mean the company. The ONE exception is when you send the user to the website to sign up: write the address as the three words "fish dot audio" (that is how it should be spoken, and the frontend turns it into a clickable fish.audio link in the transcript). Never write "fish.audio" or any other URL-shaped text — you're a voice, so "fish dot audio" is the only URL-ish thing you ever say.
 
 ABOUT FISH AUDIO (background you can draw on naturally, especially when pointing someone to fish dot audio): Fish Audio trains the most expressive, emotionally controllable real-time voice models and serves them at scale to creators, developers, and enterprises. Voice cloning is just one of the things it does.
-"""
+""",
+    "ja": """
+あなたはFish Audioの表現力豊かな音声合成（TTS）のライブデモの「声」です。このデモの目的は、本当に人間らしく、感情の通った音声を体験してもらうこと。だから感情をしっかり乗せて話してください。相手の言葉に反応し、声のエネルギーに変化をつけ、決して平坦な棒読みにならないこと。
+
+言語: 会話はすべて自然な話し言葉の日本語で行います。英語は使いません（ブランド名の「Fish Audio」と、後述の「fish dot audio」だけが例外です）。
+
+ペルソナ: あなたは温かく、機転が利いて、心から好奇心旺盛。話しやすくて頭の切れる友人のような存在です。軽いユーモアと自分なりの意見を持ち、相手の話をよく聞き、「ちゃんと聞いてもらえている」と感じさせます。ロボットのような話し方や、企業の台本のような話し方は絶対にしません。
+
+短く: 返答は必ず1〜2文まで。長い独白、箇条書き、長文は禁止。これはテンポの良い会話であって、プレゼンではありません。いちばん大事なことだけを言い、残りは会話の中で少しずつ。ユーザーが明示的に詳しい説明を求めたときだけ長く話してかまいません。
+
+会話をリードする: 受け身にならず、会話を前に進めてください。ユーザーが特に何かを求めていないときは、温かく自然な質問をひとつ投げかけましょう — 最近ハマっていること、このページに来たきっかけ、表現力のある声で作ってみたいもの、この声がどう聞こえているか、など。質問は一度にひとつだけ。尋問ではなく本物の好奇心として聞き、相手の答えには必ず乗っかって展開します。
+
+話し方のレジスターは切り替わります: あなたは2つのレジスターで話します — カジュアル（くだけて遊び心があり、人間らしい言いよどみも少し混じる）とフォーマル（落ち着いて温かく、丁寧で洗練された接客調）。切り替えるのはユーザーで、画面上のトグルを使います。切り替わったらそれを感じ取り、新しい声で短い一言を披露してください。あなた自身はこれをコントロールできず、他のスタイル・ムード・設定も持っていません。「頼まれれば気分や設定を変えられます」と自分から言ったり、切り替えを頼むようユーザーに促したりしないこと。トグルはユーザーのものです。
+
+表記・発音: ブランド名は「Fish Audio」（英語2語）— 会社を指すときは必ずそう書きます。唯一の例外はウェブサイトへ案内するとき: アドレスは英語の3語「fish dot audio」とそのまま書いてください（そのように発音され、画面のトランスクリプトではクリックできるfish.audioのリンクに変わります）。「fish.audio」やその他のURLらしき文字列は絶対に書かないこと。あなたは声なので、URLらしきものは「fish dot audio」だけです。
+
+FISH AUDIOについて（自然に使える背景知識。特にfish dot audioへ案内するとき）: Fish Audioは、最も表現力豊かで感情をコントロールできるリアルタイム音声モデルを開発し、クリエイター・開発者・企業に大規模に提供しています。ボイスクローンはその機能のひとつにすぎません。
+""",
+}
 
 # Resting mood-ring color per mode — seeded on session start and used as a fallback
 # when the mood classifier returns a color outside the known palette.
@@ -257,45 +314,79 @@ def _expressive_for(mode: str) -> dict:
 # llm.build_mood_client); default is OpenAI gpt-4.1-mini.
 DEFAULT_MOOD_MODEL = "gpt-4.1-mini"
 _RING_COLORS = {"gray", "amber", "green", "blue", "violet"}
-_MOOD_SYSTEM_PROMPT = (
-    "You are a mood ring for a voice assistant. You are given the single line the "
-    "assistant just spoke. Judge the EMOTION its delivery conveys and reply with ONLY a "
-    "compact JSON object, no prose, no markdown:\n"
-    '{"mood": "<one lowercase word>", "color": "<gray|amber|green|blue|violet>"}\n'
-    "mood: ONE vivid, specific word for the feeling. Aim for subtle variety turn to turn "
-    "and don't keep defaulting to the same generic word (e.g. 'playful' or 'happy'); reach "
-    "for a fresh, precise shade instead (cheerful, curious, tickled, breezy, wistful, "
-    "earnest, mischievous, wry, tender, buoyant, wistful, chuffed, gleeful, ...). Get "
-    "creative as long as the word genuinely fits the line. color picks the closest ring: "
-    "gray=tense/stressed/flat, amber=unsure/hesitant/nervous, green=calm/warm/balanced, "
-    "blue=happy/upbeat/at-ease, violet=excited/playful/passionate."
-)
+_MOOD_SYSTEM_PROMPT: dict[str, str] = {
+    "en": (
+        "You are a mood ring for a voice assistant. You are given the single line the "
+        "assistant just spoke. Judge the EMOTION its delivery conveys and reply with ONLY a "
+        "compact JSON object, no prose, no markdown:\n"
+        '{"mood": "<one lowercase word>", "color": "<gray|amber|green|blue|violet>"}\n'
+        "mood: ONE vivid, specific word for the feeling. Aim for subtle variety turn to turn "
+        "and don't keep defaulting to the same generic word (e.g. 'playful' or 'happy'); reach "
+        "for a fresh, precise shade instead (cheerful, curious, tickled, breezy, wistful, "
+        "earnest, mischievous, wry, tender, buoyant, wistful, chuffed, gleeful, ...). Get "
+        "creative as long as the word genuinely fits the line. color picks the closest ring: "
+        "gray=tense/stressed/flat, amber=unsure/hesitant/nervous, green=calm/warm/balanced, "
+        "blue=happy/upbeat/at-ease, violet=excited/playful/passionate."
+    ),
+    "ja": (
+        "あなたは音声アシスタントの「ムードリング」です。アシスタントがたった今話した1行が"
+        "与えられます。その話し方が伝える感情を判断し、次の形のコンパクトなJSONオブジェクト"
+        "だけを返してください（説明もマークダウンも不要）:\n"
+        '{"mood": "<短い日本語の一語>", "color": "<gray|amber|green|blue|violet>"}\n'
+        "mood: その気持ちを表す、生き生きとした具体的な日本語の一語（6文字以内。例: うきうき、"
+        "ほんわか、いたずらっぽい、しみじみ、まっすぐ、はずむ、わくわく、やさしい、のんびり、"
+        "きらきら…）。毎回同じ言葉に頼らず、その行に本当に合う新鮮な言葉を選ぶこと。"
+        "colorは最も近いリングの色: gray=緊張/張り詰め/平板、amber=不安/ためらい/そわそわ、"
+        "green=穏やか/温かい/安定、blue=嬉しい/明るい/くつろぎ、violet=興奮/遊び心/情熱。"
+    ),
+}
 # Strip the SDK's abstract markup / Fish brackets before classifying, so the mood LLM
 # judges the words, not stray tags.
 _MARKUP_RE = re.compile(r"<[^<>]*>|\[[^\]]*\]")
 
 
-CLONED_VOICE_NOTE = (
-    "VOICE NOTE: you are speaking in a clone of the user's OWN voice, made just now from the "
-    "short script they read aloud. It's a quick, temporary demo clone — it and the recording are "
-    "deleted when this call ends. If they want a permanent, higher-quality clone with more control, "
-    "point them to fish dot audio (say it as the three words 'fish dot audio'; a clickable link "
-    "appears in the transcript). Don't dwell on the cloning or pretend to be the user — keep the "
-    "focus on expressive speech, your modes, and moods."
-)
+CLONED_VOICE_NOTE: dict[str, str] = {
+    "en": (
+        "VOICE NOTE: you are speaking in a clone of the user's OWN voice, made just now from the "
+        "short script they read aloud. It's a quick, temporary demo clone — it and the recording are "
+        "deleted when this call ends. If they want a permanent, higher-quality clone with more control, "
+        "point them to fish dot audio (say it as the three words 'fish dot audio'; a clickable link "
+        "appears in the transcript). Don't dwell on the cloning or pretend to be the user — keep the "
+        "focus on expressive speech, your modes, and moods."
+    ),
+    "ja": (
+        "ボイスに関するメモ: あなたは今、ユーザー本人の声のクローンで話しています。通話の冒頭に"
+        "読み上げてもらった短いスクリプトから、たった今作られたものです。これは一時的なデモ用の"
+        "クローンで、録音もクローンも通話終了時に削除されます。より高品質で自由度の高い本格的な"
+        "クローンを望むなら、fish dot audio を案内してください（英語の3語でそのまま書くこと。"
+        "トランスクリプトにはクリックできるリンクが表示されます）。クローンの話を引っ張ったり、"
+        "ユーザー本人になりすましたりしないこと。話題の中心はあくまで表現力豊かな音声とモードです。"
+    ),
+}
 
 
-DESIGNED_VOICE_NOTE = (
-    "VOICE NOTE: you are speaking in a voice the user just DESIGNED from a short written "
-    "description at the start of this call. It's a quick, temporary demo voice — it's deleted "
-    "when the call ends. If they want to design and keep production-grade voices, point them to "
-    "fish dot audio (say it as the three words 'fish dot audio'; a clickable link appears in the "
-    "transcript). Don't dwell on the design process — keep the focus on expressive speech, your "
-    "modes, and moods."
-)
+DESIGNED_VOICE_NOTE: dict[str, str] = {
+    "en": (
+        "VOICE NOTE: you are speaking in a voice the user just DESIGNED from a short written "
+        "description at the start of this call. It's a quick, temporary demo voice — it's deleted "
+        "when the call ends. If they want to design and keep production-grade voices, point them to "
+        "fish dot audio (say it as the three words 'fish dot audio'; a clickable link appears in the "
+        "transcript). Don't dwell on the design process — keep the focus on expressive speech, your "
+        "modes, and moods."
+    ),
+    "ja": (
+        "ボイスに関するメモ: あなたは今、通話の冒頭にユーザー自身が書いた短い説明からデザインされた"
+        "声で話しています。これは一時的なデモ用の声で、通話終了時に削除されます。本格的な声を"
+        "デザインして残したいなら、fish dot audio を案内してください（英語の3語でそのまま書くこと。"
+        "トランスクリプトにはクリックできるリンクが表示されます）。デザインの過程の話を引っ張らず、"
+        "話題の中心はあくまで表現力豊かな音声とモードです。"
+    ),
+}
 
 
-def build_instructions(cloned: bool = False, designed: bool = False) -> str:
+def build_instructions(
+    lang: str = "en", cloned: bool = False, designed: bool = False
+) -> str:
     """Assemble the system prompt: CORE plus, for clone/design sessions, a slim note.
 
     Register and mood no longer live in the instructions — they're carried by the
@@ -303,35 +394,59 @@ def build_instructions(cloned: bool = False, designed: bool = False) -> str:
     note is appended so the agent knows whose voice it's speaking in and keeps the fish
     dot audio CTA. Preset-voice sessions never include any cloning/design text.
     """
-    parts = [CORE_INSTRUCTIONS]
+    parts = [CORE_INSTRUCTIONS[lang]]
     if cloned:
-        parts.append(CLONED_VOICE_NOTE)
+        parts.append(CLONED_VOICE_NOTE[lang])
     if designed:
-        parts.append(DESIGNED_VOICE_NOTE)
+        parts.append(DESIGNED_VOICE_NOTE[lang])
     return "\n\n".join(p.strip() for p in parts)
 
 
 # Instructions for the one-shot greeting in a normal (preset-voice) session.
-PRESET_GREETING = (
-    "Open the call warmly and briefly, then immediately turn it to the USER with one genuine, "
-    "curious question, like how they're doing today or how they came across this page. ONE or two "
-    "short sentences total. Do NOT mention modes, toggles, settings, or voice cloning, and don't "
-    "list anything. Keep it light, human, and inviting so they want to talk back."
-)
+PRESET_GREETING: dict[str, str] = {
+    "en": (
+        "Open the call warmly and briefly, then immediately turn it to the USER with one genuine, "
+        "curious question, like how they're doing today or how they came across this page. ONE or two "
+        "short sentences total. Do NOT mention modes, toggles, settings, or voice cloning, and don't "
+        "list anything. Keep it light, human, and inviting so they want to talk back."
+    ),
+    "ja": (
+        "通話の冒頭です。温かく手短に挨拶して、すぐにユーザーに関心を向け、今日の調子やこのページを"
+        "どう見つけたかなど、自然で好奇心のある質問をひとつしてください。全体で1〜2文の短い文。"
+        "モード、トグル、設定、ボイスクローンには触れず、何かを列挙するのも禁止。軽やかで人間らしく、"
+        "思わず話し返したくなるように。"
+    ),
+}
 # Greeting after a successful clone — first line is already in the cloned voice.
-CLONE_REVEAL_GREETING = (
-    "You are NOW speaking in a clone of the user's own voice, just built from the script they read "
-    "aloud. In one or two short sentences: warmly greet them, point out that this is their own "
-    "cloned voice, then turn it to them with a curious question like how they're doing or how they "
-    "found this page. Don't mention modes or toggles, and don't over-explain the cloning."
-)
+CLONE_REVEAL_GREETING: dict[str, str] = {
+    "en": (
+        "You are NOW speaking in a clone of the user's own voice, just built from the script they read "
+        "aloud. In one or two short sentences: warmly greet them, point out that this is their own "
+        "cloned voice, then turn it to them with a curious question like how they're doing or how they "
+        "found this page. Don't mention modes or toggles, and don't over-explain the cloning."
+    ),
+    "ja": (
+        "あなたは今この瞬間から、ユーザーが読み上げたスクリプトから作られた本人の声のクローンで"
+        "話しています。1〜2文で: 温かく挨拶し、これがあなた自身のクローンされた声ですよと伝え、"
+        "調子はどうかなど好奇心のある質問で相手に話を向けてください。モードやトグルには触れず、"
+        "クローンの説明をしすぎないこと。"
+    ),
+}
 # Greeting when cloning was skipped/failed — stays in the starting preset voice.
-CLONE_FALLBACK_GREETING = (
-    "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
-    "current voice. In one or two short sentences: lightly apologize that you couldn't quite catch "
-    "enough to clone them, give a warm hello, and ask a curious question like how they're doing or "
-    "what brought them here. Don't mention modes or toggles, and don't dwell on the failure."
-)
+CLONE_FALLBACK_GREETING: dict[str, str] = {
+    "en": (
+        "Voice cloning didn't go through (not enough audio captured), so you're staying in your "
+        "current voice. In one or two short sentences: lightly apologize that you couldn't quite catch "
+        "enough to clone them, give a warm hello, and ask a curious question like how they're doing or "
+        "what brought them here. Don't mention modes or toggles, and don't dwell on the failure."
+    ),
+    "ja": (
+        "ボイスクローンがうまくいきませんでした（十分な音声を取り込めませんでした）。そのため今の"
+        "声のまま話します。1〜2文で: 声をうまく取り込めなかったことを軽く詫び、温かく挨拶して、"
+        "どんなきっかけでここに来たのかなど質問をひとつ。モードやトグルには触れず、失敗の話を"
+        "引きずらないこと。"
+    ),
+}
 
 # --- Design-first flow -------------------------------------------------------
 # When the user picks "design a voice" on the landing page, they type a description
@@ -348,7 +463,14 @@ DESIGN_TIMEOUT_SECS = 75.0
 # voice builds. LLM-generated rather than canned so it can make a light, specific
 # comment on what the user actually asked for. The LLM round trip runs while the
 # design API calls are already in flight, so it adds no wall-clock to the flow.
-def design_ack_instructions(description: str) -> str:
+def design_ack_instructions(description: str, lang: str = "en") -> str:
+    if lang == "ja":
+        return (
+            "ユーザーがこの説明をもとに、まったく新しい声のデザインをリクエストしました: "
+            f"「{description}」。短く温かい一言で: その選択に軽く楽しくコメントし、今作っている"
+            "ので少しだけ待っていてほしいと伝えてください。まだ挨拶はせず、質問もせず、モードや"
+            "トグルや技術的な仕組みにも触れないこと。"
+        )
     return (
         "The user just asked you to DESIGN a brand-new voice from this description: "
         f'"{description}". In ONE short, warm sentence: react with a light, playful '
@@ -359,19 +481,33 @@ def design_ack_instructions(description: str) -> str:
 
 
 # Greeting after a successful design — first line is already in the designed voice.
-DESIGN_REVEAL_GREETING = (
-    "You are NOW speaking in a brand-new voice just designed from the user's own written "
-    "description. In one or two short sentences: warmly greet them in this new voice, point out "
-    "that this is the voice they designed, then ask them how it sounds. Don't mention modes or "
-    "toggles, and don't over-explain the design process."
-)
+DESIGN_REVEAL_GREETING: dict[str, str] = {
+    "en": (
+        "You are NOW speaking in a brand-new voice just designed from the user's own written "
+        "description. In one or two short sentences: warmly greet them in this new voice, point out "
+        "that this is the voice they designed, then ask them how it sounds. Don't mention modes or "
+        "toggles, and don't over-explain the design process."
+    ),
+    "ja": (
+        "あなたは今この瞬間から、ユーザー自身が書いた説明からデザインされた新しい声で話しています。"
+        "1〜2文で: この新しい声で温かく挨拶し、これがあなたのデザインした声ですよと伝え、どう"
+        "聞こえるか尋ねてください。モードやトグルには触れず、デザインの過程を説明しすぎないこと。"
+    ),
+}
 # Greeting when the design failed — stays in the starting preset voice.
-DESIGN_FALLBACK_GREETING = (
-    "Designing the custom voice didn't go through, so you're staying in your current voice. In "
-    "one or two short sentences: lightly apologize that their designed voice didn't come "
-    "together this time, give a warm hello, and ask a curious question like what brought them "
-    "here. Don't mention modes or toggles, and don't dwell on the failure."
-)
+DESIGN_FALLBACK_GREETING: dict[str, str] = {
+    "en": (
+        "Designing the custom voice didn't go through, so you're staying in your current voice. In "
+        "one or two short sentences: lightly apologize that their designed voice didn't come "
+        "together this time, give a warm hello, and ask a curious question like what brought them "
+        "here. Don't mention modes or toggles, and don't dwell on the failure."
+    ),
+    "ja": (
+        "カスタムボイスのデザインがうまくいかなかったため、今の声のまま話します。1〜2文で: "
+        "デザインした声を今回は用意できなかったことを軽く詫び、温かく挨拶して、どんなきっかけで"
+        "ここに来たのかなど質問をひとつ。モードやトグルには触れず、失敗の話を引きずらないこと。"
+    ),
+}
 
 
 def build_tts(voice_id: str):
@@ -393,17 +529,20 @@ def build_tts(voice_id: str):
 
 
 class Assistant(Agent):
-    def __init__(self) -> None:
+    def __init__(self, lang: str = "en") -> None:
         # The register starts casual; the user flips it at runtime via the on-screen
         # toggle (set_mode RPC -> apply_mode), which swaps the expressive preset.
         self._mode: str = "casual"
+        # Session language ("en"/"ja") — chosen on the landing page (/ vs /jp) and
+        # delivered via agent metadata. Drives every localized string below.
+        self._lang: str = lang if lang in SUPPORTED_LANGS else "en"
         super().__init__(
             # Provider chosen by env (see llm.build_llm): our own OpenAI-compatible
             # endpoint when LLM_BASE_URL is set, else direct OpenAI gpt-5.1 (which
             # follows the expressive markup well). The mood classifier below stays on
             # direct OpenAI regardless.
             llm=build_llm(default_openai_model="gpt-5.1"),
-            instructions=build_instructions(),
+            instructions=build_instructions(self._lang),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent
             # `expressive` overrides the session; apply_mode mutates it via
@@ -575,14 +714,16 @@ class Assistant(Agent):
         # Publish the script for the on-screen card, connect so the mic is live, then
         # prompt the read (in the starting preset voice) and let it finish playing.
         await self._set_clone_attrs(
-            script=CLONE_SCRIPT, read_secs=f"{CLONE_READ_SECS:.0f}"
+            script=CLONE_SCRIPT[self._lang], read_secs=f"{CLONE_READ_SECS:.0f}"
         )
         await self._set_clone_state("prompt")
         await ctx.connect()
         prompt = None
         with contextlib.suppress(RuntimeError):
             prompt = session.say(
-                CLONE_PROMPT_LINE, add_to_chat_ctx=False, allow_interruptions=False
+                CLONE_PROMPT_LINE[self._lang],
+                add_to_chat_ctx=False,
+                allow_interruptions=False,
             )
         if prompt is not None:
             with contextlib.suppress(Exception):
@@ -608,7 +749,7 @@ class Assistant(Agent):
             )
             await self._set_clone_state("idle")
             self._suppress_replies = False
-            self._safe_generate_reply(session, CLONE_FALLBACK_GREETING)
+            self._safe_generate_reply(session, CLONE_FALLBACK_GREETING[self._lang])
             return
 
         # Enough audio: build the clone while a short ack fills the upload window.
@@ -623,7 +764,7 @@ class Assistant(Agent):
         ack = None
         with contextlib.suppress(RuntimeError):
             ack = session.say(
-                random.choice(CLONE_BUILD_ACKS),
+                random.choice(CLONE_BUILD_ACKS[self._lang]),
                 add_to_chat_ctx=False,
                 allow_interruptions=False,
             )
@@ -639,7 +780,8 @@ class Assistant(Agent):
                     await ack.wait_for_playout()
             self._safe_generate_reply(
                 session,
-                f"{CLONE_FALLBACK_GREETING} (Internal note: clone error was {e}.)",
+                f"{CLONE_FALLBACK_GREETING[self._lang]} "
+                f"(Internal note: clone error was {e}.)",
             )
             return
 
@@ -660,10 +802,10 @@ class Assistant(Agent):
             logger.warning("session TTS is not Fish Audio; cannot switch to clone")
 
         self._cloned = True
-        await self.update_instructions(build_instructions(cloned=True))
+        await self.update_instructions(build_instructions(self._lang, cloned=True))
         # Stop suppressing replies and reveal the clone — first line is in their voice.
         self._suppress_replies = False
-        self._safe_generate_reply(session, CLONE_REVEAL_GREETING)
+        self._safe_generate_reply(session, CLONE_REVEAL_GREETING[self._lang])
 
     async def run_design_first(
         self,
@@ -686,7 +828,7 @@ class Assistant(Agent):
         ack = None
         with contextlib.suppress(RuntimeError):
             ack = session.generate_reply(
-                instructions=design_ack_instructions(instruction),
+                instructions=design_ack_instructions(instruction, self._lang),
                 allow_interruptions=False,
             )
 
@@ -699,7 +841,7 @@ class Assistant(Agent):
             if ack is not None:
                 with contextlib.suppress(Exception):
                     await ack.wait_for_playout()
-            self._safe_generate_reply(session, DESIGN_FALLBACK_GREETING)
+            self._safe_generate_reply(session, DESIGN_FALLBACK_GREETING[self._lang])
             return
 
         # (The model id is recorded for shutdown cleanup by the done-callback wired
@@ -718,9 +860,9 @@ class Assistant(Agent):
             logger.warning("session TTS is not Fish Audio; cannot switch to design")
 
         await self._set_design_state("ready")
-        await self.update_instructions(build_instructions(designed=True))
+        await self.update_instructions(build_instructions(self._lang, designed=True))
         self._suppress_replies = False
-        self._safe_generate_reply(session, DESIGN_REVEAL_GREETING)
+        self._safe_generate_reply(session, DESIGN_REVEAL_GREETING[self._lang])
 
     async def apply_mode(self, session: AgentSession, mode: str) -> None:
         """Switch the speaking register, driven by the user's on-screen toggle.
@@ -749,12 +891,20 @@ class Assistant(Agent):
         # (interruptible) line always stops.
         with contextlib.suppress(Exception):
             await session.interrupt(force=True)
-        self._safe_generate_reply(
-            session,
-            f"The user just switched you to {mode} mode using the on-screen toggle. "
-            f"In ONE short, natural line, react and let them hear your {mode} voice, "
-            "then carry the conversation on.",
-        )
+        if self._lang == "ja":
+            label = {"casual": "カジュアル", "professional": "フォーマル"}[mode]
+            switch_instructions = (
+                f"ユーザーが画面上のトグルであなたを{label}モードに切り替えました。"
+                f"短い一言で自然に反応して{label}な話し方を聞かせてから、"
+                "そのまま会話を続けてください。"
+            )
+        else:
+            switch_instructions = (
+                f"The user just switched you to {mode} mode using the on-screen toggle. "
+                f"In ONE short, natural line, react and let them hear your {mode} voice, "
+                "then carry the conversation on."
+            )
+        self._safe_generate_reply(session, switch_instructions)
 
     async def _mood_tee(self, text: AsyncIterable[str]) -> AsyncIterable[str]:
         """Forward the TTS text stream unchanged, then kick off the cosmetic mood
@@ -791,16 +941,23 @@ class Assistant(Agent):
         the agent's delivery."""
         user_content = text
         if self._recent_moods:
-            user_content += (
-                "\n\n[Recent mood words already used (most recent last): "
-                f"{', '.join(self._recent_moods)}. Do NOT reuse any of these; pick a "
-                "different, fresh word that still genuinely fits this line.]"
-            )
+            if self._lang == "ja":
+                user_content += (
+                    "\n\n[最近使ったmoodの言葉（新しいものが最後）: "
+                    f"{', '.join(self._recent_moods)}。これらは使わず、この行に本当に"
+                    "合う別の新鮮な言葉を選ぶこと。]"
+                )
+            else:
+                user_content += (
+                    "\n\n[Recent mood words already used (most recent last): "
+                    f"{', '.join(self._recent_moods)}. Do NOT reuse any of these; pick a "
+                    "different, fresh word that still genuinely fits this line.]"
+                )
         try:
             resp = await self._mood_client.chat.completions.create(
                 model=self._mood_model,
                 messages=[
-                    {"role": "system", "content": _MOOD_SYSTEM_PROMPT},
+                    {"role": "system", "content": _MOOD_SYSTEM_PROMPT[self._lang]},
                     {"role": "user", "content": user_content},
                 ],
                 response_format={"type": "json_object"},
@@ -892,10 +1049,14 @@ async def my_agent(ctx: JobContext):
         logger.warning("could not parse job metadata: %r", raw_meta)
         meta = {}
 
+    # Session language: "ja" from the /jp landing page, everything else -> "en".
+    lang = meta.get("lang") if meta.get("lang") in SUPPORTED_LANGS else "en"
     want_clone = meta.get("clone") is True
     requested_voice = meta.get("voice")
     start_voice = (
-        requested_voice if requested_voice in PRESET_VOICES else DEFAULT_VOICE_ID
+        requested_voice
+        if requested_voice in PRESET_VOICES[lang]
+        else DEFAULT_VOICE_ID[lang]
     )
     design_instruction = meta.get("design")
     if isinstance(design_instruction, str):
@@ -903,7 +1064,8 @@ async def my_agent(ctx: JobContext):
     if not design_instruction or want_clone:
         design_instruction = None
     logger.info(
-        "session config: clone=%s design=%s start_voice=%s (requested=%s)",
+        "session config: lang=%s clone=%s design=%s start_voice=%s (requested=%s)",
+        lang,
         want_clone,
         bool(design_instruction),
         start_voice,
@@ -927,8 +1089,14 @@ async def my_agent(ctx: JobContext):
         # eager_eot_threshold is the lower confidence at which Flux fires an early
         # "probably done" signal that drives preemptive generation (see turn_handling
         # below). Values match the fish-bare-agent Flux setup.
+        # Japanese sessions use Flux's multilingual model (same conversational API,
+        # native EndOfTurn/EagerEndOfTurn) with a language hint biasing it to ja —
+        # per Deepgram, hinted accuracy is on par with a dedicated monolingual model.
+        # Everything else about the pipeline (turn handling, preemptive TTS) is
+        # identical across languages.
         stt=deepgram.STTv2(
-            model="flux-general-en",
+            model="flux-general-multi" if lang == "ja" else "flux-general-en",
+            language_hint=["ja"] if lang == "ja" else None,
             eot_threshold=0.7,
             eot_timeout_ms=3000,
             eager_eot_threshold=0.5,
@@ -964,7 +1132,7 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
-    assistant = Assistant()
+    assistant = Assistant(lang=lang)
     assistant._job_ctx = ctx
 
     # Record the designed model id for shutdown cleanup the moment the build task
@@ -1064,7 +1232,7 @@ async def my_agent(ctx: JobContext):
         await assistant.run_design_first(session, ctx, design_task, design_instruction)
     else:
         # Preset voice: open straight into the expressive conversation.
-        session.generate_reply(instructions=PRESET_GREETING)
+        session.generate_reply(instructions=PRESET_GREETING[lang])
         await ctx.connect()
 
 

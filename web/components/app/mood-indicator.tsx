@@ -7,6 +7,7 @@ import {
   useParticipantAttribute,
   useVoiceAssistant,
 } from '@livekit/components-react';
+import { type UiStrings, useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 // Mood-ring palette. A separate, cosmetic LLM in the agent process reads each line
@@ -22,14 +23,15 @@ const RING_COLORS: Record<string, { dot: string; glow: string }> = {
   violet: { dot: 'bg-violet-500', glow: 'shadow-[0_0_12px_2px] shadow-violet-500/60' },
 };
 
-// Live pipeline state → a short human label shown as grey subtext next to the mood.
-// `listening` is the window the user is speaking (until the agent flips to `thinking`).
-const STATE_LABEL: Partial<Record<AgentState, string>> = {
-  listening: 'listening',
-  thinking: 'thinking',
-  speaking: 'speaking',
-  initializing: 'connecting',
-  connecting: 'connecting',
+// Live pipeline state → a localized short label shown as grey subtext next to the
+// mood. `listening` is the window the user is speaking (until the agent flips to
+// `thinking`).
+const STATE_LABEL_KEY: Partial<Record<AgentState, keyof UiStrings>> = {
+  listening: 'stateListening',
+  thinking: 'stateThinking',
+  speaking: 'stateSpeaking',
+  initializing: 'stateConnecting',
+  connecting: 'stateConnecting',
 };
 
 interface MoodIndicatorProps {
@@ -51,9 +53,11 @@ function MoodIndicatorInner({
   state: AgentState;
   className?: string;
 }) {
+  const strings = useStrings();
   const mood = useParticipantAttribute('style.mood', { participant: agent });
   const rawColor = useParticipantAttribute('style.color', { participant: agent });
 
+  // Capitalization is a no-op for Japanese moods (no case in kana/kanji).
   const moodLabel = mood ? mood.charAt(0).toUpperCase() + mood.slice(1) : null;
 
   // `failed` means the agent participant briefly dropped from the room (see
@@ -67,10 +71,12 @@ function MoodIndicatorInner({
   // Otherwise the mood is always the primary label once we have one (e.g. "Curious");
   // the live pipeline state rides along as grey subtext ("Curious · listening" /
   // "· speaking" / "· thinking"). Before any mood lands, fall back to the state word.
-  const stateLabel = STATE_LABEL[state];
+  const stateLabelKey = STATE_LABEL_KEY[state];
+  const stateLabel = stateLabelKey ? (strings[stateLabelKey] as string) : undefined;
   const primary = reconnecting
-    ? 'Reconnecting…'
-    : (moodLabel ?? (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : 'Listening'));
+    ? strings.reconnecting
+    : (moodLabel ??
+      (stateLabel ? stateLabel[0].toUpperCase() + stateLabel.slice(1) : strings.stateListening));
   const suffix = reconnecting ? null : moodLabel && stateLabel ? stateLabel : null;
 
   // Pulse while actively engaged. Listening gets a softer, slower pulse than the

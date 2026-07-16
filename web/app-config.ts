@@ -1,3 +1,5 @@
+import type { Locale } from '@/lib/i18n';
+
 /** A preset Fish Audio voice the user can choose on the landing page. */
 export interface PresetVoice {
   id: string;
@@ -8,7 +10,7 @@ export interface PresetVoice {
   sampleUrl: string;
 }
 
-// Keep in sync with PRESET_VOICES in fish/src/agent.py.
+// Keep in sync with PRESET_VOICES["en"] in fish/src/agent.py.
 export const PRESET_VOICES: PresetVoice[] = [
   {
     id: '0e24ff9936d34df4bddce26398cf1311',
@@ -35,6 +37,45 @@ export const PRESET_VOICES: PresetVoice[] = [
     sampleUrl: '/voice-samples/9a3a69c63dbc4774ac41b03945229dc8.mp3',
   },
 ];
+
+// Japanese presets for the /jp page. Keep in sync with PRESET_VOICES["ja"] in
+// fish/src/agent.py.
+export const PRESET_VOICES_JA: PresetVoice[] = [
+  {
+    id: '297a6fd278df47c3b9da9bfdf55ac89a',
+    name: 'さとる',
+    descriptor: '男性 · 落ち着いたナレーション',
+    sampleUrl: '/voice-samples/297a6fd278df47c3b9da9bfdf55ac89a.mp3',
+  },
+  {
+    id: '88ee033403f24744965262d7369686e1',
+    name: 'まり',
+    descriptor: '女性 · やわらかく穏やか',
+    sampleUrl: '/voice-samples/88ee033403f24744965262d7369686e1.mp3',
+  },
+  {
+    id: '8d7ac3b4f8cc4f7cbe2f39887e8c5247',
+    name: '丁寧な青年',
+    descriptor: '男性 · 誠実で丁寧',
+    sampleUrl: '/voice-samples/8d7ac3b4f8cc4f7cbe2f39887e8c5247.mp3',
+  },
+  {
+    id: 'b2d9d8db057042688a5e318b8f405bc2',
+    name: 'きょうこ',
+    descriptor: '女性 · カスタマーサポート',
+    sampleUrl: '/voice-samples/b2d9d8db057042688a5e318b8f405bc2.mp3',
+  },
+];
+
+/** The preset list shown on a given locale's landing page. */
+export function getPresetVoices(locale: Locale): PresetVoice[] {
+  return locale === 'ja' ? PRESET_VOICES_JA : PRESET_VOICES;
+}
+
+/** Default landing-page selection for a locale — its first preset. */
+export function getDefaultVoiceId(locale: Locale): string {
+  return getPresetVoices(locale)[0].id;
+}
 
 /** Sentinel selection value meaning "clone my own voice" rather than a preset id. */
 export const CLONE_SELECTION = 'clone' as const;
@@ -91,3 +132,17 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,
 };
+
+// Japanese page copy for /jp. Everything else (agent name, accents, flags) is
+// shared with the defaults above.
+const JA_PAGE_TEXT: Pick<AppConfig, 'pageTitle' | 'pageDescription' | 'startButtonText'> = {
+  pageTitle: '表現力豊かなボイスエージェントと話そう — Fish Audio',
+  pageDescription:
+    'Fish Audioの表現力豊かな音声合成で動くボイスエージェントと話せます。通話中にカジュアルとフォーマルを切り替えると、ムードがリアルタイムに変わります。短いスクリプトを読んで自分の声をクローンすることも可能です。録音とクローンは通話終了時に削除されます。',
+  startButtonText: '通話を開始',
+};
+
+/** Overlay the locale's page copy onto a base config ('en' passes through). */
+export function localizeAppConfig(config: AppConfig, locale: Locale): AppConfig {
+  return locale === 'ja' ? { ...config, ...JA_PAGE_TEXT } : config;
+}

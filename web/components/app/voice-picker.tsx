@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { MicrophoneIcon, PauseIcon, PlayIcon, SparkleIcon } from '@phosphor-icons/react/dist/ssr';
-import { CLONE_SELECTION, DESIGN_SELECTION, PRESET_VOICES } from '@/app-config';
+import { CLONE_SELECTION, DESIGN_SELECTION, getPresetVoices } from '@/app-config';
+import { useLocale, useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 interface VoicePickerProps {
@@ -18,6 +19,8 @@ export function VoicePicker({
   designInstruction,
   onDesignInstructionChange,
 }: VoicePickerProps) {
+  const strings = useStrings();
+  const presetVoices = getPresetVoices(useLocale());
   // One shared audio element; previewing a voice stops any other preview.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export function VoicePicker({
 
   return (
     <div className="mt-8 flex w-full max-w-md flex-col gap-2">
-      {PRESET_VOICES.map((voice) => {
+      {presetVoices.map((voice) => {
         const isSelected = selection === voice.id;
         const isPlaying = playingId === voice.id;
         return (
@@ -74,7 +77,9 @@ export function VoicePicker({
           >
             <button
               type="button"
-              aria-label={isPlaying ? `Stop ${voice.name} preview` : `Preview ${voice.name}`}
+              aria-label={
+                isPlaying ? strings.stopPreview(voice.name) : strings.previewVoice(voice.name)
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 togglePreview(voice.id, voice.sampleUrl);
@@ -109,7 +114,7 @@ export function VoicePicker({
 
       <div className="my-1 flex items-center gap-3">
         <span className="bg-border h-px flex-1" />
-        <span className="text-muted-foreground text-xs">or</span>
+        <span className="text-muted-foreground text-xs">{strings.orDivider}</span>
         <span className="bg-border h-px flex-1" />
       </div>
 
@@ -136,10 +141,8 @@ export function VoicePicker({
           <MicrophoneIcon weight="fill" className="size-4" />
         </span>
         <span className="flex flex-col">
-          <span className="text-foreground text-sm font-medium">Clone your voice</span>
-          <span className="text-muted-foreground text-xs">
-            Read a short script &mdash; talk to an expressive version of yourself
-          </span>
+          <span className="text-foreground text-sm font-medium">{strings.cloneTitle}</span>
+          <span className="text-muted-foreground text-xs">{strings.cloneSubtitle}</span>
         </span>
         <span
           className={cn(
@@ -174,10 +177,8 @@ export function VoicePicker({
             <SparkleIcon weight="fill" className="size-4" />
           </span>
           <span className="flex flex-col">
-            <span className="text-foreground text-sm font-medium">Design a voice</span>
-            <span className="text-muted-foreground text-xs">
-              Describe a voice in words &mdash; it&rsquo;s built on the spot
-            </span>
+            <span className="text-foreground text-sm font-medium">{strings.designTitle}</span>
+            <span className="text-muted-foreground text-xs">{strings.designSubtitle}</span>
           </span>
           <span
             className={cn(
@@ -198,7 +199,7 @@ export function VoicePicker({
             onKeyDown={(e) => e.stopPropagation()}
             rows={2}
             maxLength={500}
-            placeholder="e.g. energetic young presenter, bright tone, crisp diction, friendly but not cartoonish"
+            placeholder={strings.designPlaceholder}
             className={cn(
               'border-border bg-background placeholder:text-muted-foreground/60 mt-3 w-full resize-none rounded-lg border px-3 py-2 text-sm',
               'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none'

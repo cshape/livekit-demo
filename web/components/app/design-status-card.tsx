@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useParticipantAttribute, useVoiceAssistant } from '@livekit/components-react';
 import { SparkleIcon } from '@phosphor-icons/react/dist/ssr';
 import { AgentChatIndicator } from '@/components/agents-ui/agent-chat-indicator';
+import { useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 // Centered overlay shown while the agent builds the designed voice
@@ -22,6 +23,7 @@ function DesignStatusCardInner({
   agent: RemoteParticipant;
   className?: string;
 }) {
+  const strings = useStrings();
   const state = useParticipantAttribute('design.state', { participant: agent });
 
   return (
@@ -41,7 +43,7 @@ function DesignStatusCardInner({
           <div className="flex flex-col items-center gap-4 py-4">
             <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
               <SparkleIcon weight="fill" className="size-4" />
-              Designing your voice
+              {strings.designBuilding}
             </div>
             <AgentChatIndicator size="md" />
           </div>

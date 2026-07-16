@@ -6,9 +6,9 @@ import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   type AppConfig,
   CLONE_SELECTION,
-  DEFAULT_VOICE_ID,
   DESIGN_INSTRUCTION_MAX_CHARS,
   DESIGN_SELECTION,
+  getDefaultVoiceId,
 } from '@/app-config';
 import { AgentSessionProvider } from '@/components/agents-ui/agent-session-provider';
 import { StartAudioButton } from '@/components/agents-ui/start-audio-button';
@@ -16,6 +16,7 @@ import { ErrorBoundary } from '@/components/app/error-boundary';
 import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
+import { type Locale, LocaleProvider, UI_STRINGS } from '@/lib/i18n';
 import { clearTokenCache, createCachingTokenSource } from '@/lib/token-source';
 import { getSandboxTokenSource } from '@/lib/utils';
 
@@ -27,25 +28,30 @@ function AppSetup() {
 
 interface AppProps {
   appConfig: AppConfig;
+  /** Page locale: 'en' on /, 'ja' on /jp. Drives UI strings, the preset voice
+   * list, and the `lang` the agent worker localizes its side against. */
+  locale?: Locale;
 }
 
-export function App({ appConfig }: AppProps) {
+export function App({ appConfig, locale = 'en' }: AppProps) {
   // The voice choice made on the landing page (a preset voice_id, 'clone', or
   // 'design'). It rides agentMetadata to the worker, so it must be in the
-  // useSession options before start() runs. Maren (first preset) is pre-selected.
-  const [selection, setSelection] = useState<string>(DEFAULT_VOICE_ID);
+  // useSession options before start() runs. The locale's first preset is
+  // pre-selected (Maren on /, さとる on /jp).
+  const [selection, setSelection] = useState<string>(() => getDefaultVoiceId(locale));
   // Free-text description for the "design a voice" option; rides agentMetadata too.
   const [designInstruction, setDesignInstruction] = useState('');
 
   const agentMetadata = useMemo(() => {
-    if (selection === CLONE_SELECTION) return JSON.stringify({ clone: true });
+    if (selection === CLONE_SELECTION) return JSON.stringify({ clone: true, lang: locale });
     if (selection === DESIGN_SELECTION) {
       return JSON.stringify({
         design: designInstruction.trim().slice(0, DESIGN_INSTRUCTION_MAX_CHARS),
+        lang: locale,
       });
     }
-    return JSON.stringify({ voice: selection });
-  }, [selection, designInstruction]);
+    return JSON.stringify({ voice: selection, lang: locale });
+  }, [selection, designInstruction, locale]);
 
   // Recreate the token source whenever the metadata changes so it starts with an
   // empty cache. livekit-client's TokenSourceCached has an inverted cache check
@@ -119,34 +125,36 @@ export function App({ appConfig }: AppProps) {
   }, [session.isConnected]);
 
   return (
-    <AgentSessionProvider session={session}>
-      <AppSetup />
-      <main className="grid h-svh grid-cols-1 place-content-center">
-        <ErrorBoundary>
-          <ViewController
-            appConfig={appConfig}
-            selection={selection}
-            onSelectionChange={setSelection}
-            designInstruction={designInstruction}
-            onDesignInstructionChange={setDesignInstruction}
-          />
-        </ErrorBoundary>
-      </main>
-      <StartAudioButton label="Start Audio" />
-      <Toaster
-        icons={{
-          warning: <WarningIcon weight="bold" />,
-        }}
-        position="top-center"
-        className="toaster group"
-        style={
-          {
-            '--normal-bg': 'var(--popover)',
-            '--normal-text': 'var(--popover-foreground)',
-            '--normal-border': 'var(--border)',
-          } as React.CSSProperties
-        }
-      />
-    </AgentSessionProvider>
+    <LocaleProvider locale={locale}>
+      <AgentSessionProvider session={session}>
+        <AppSetup />
+        <main className="grid h-svh grid-cols-1 place-content-center">
+          <ErrorBoundary>
+            <ViewController
+              appConfig={appConfig}
+              selection={selection}
+              onSelectionChange={setSelection}
+              designInstruction={designInstruction}
+              onDesignInstructionChange={setDesignInstruction}
+            />
+          </ErrorBoundary>
+        </main>
+        <StartAudioButton label={UI_STRINGS[locale].startAudio} />
+        <Toaster
+          icons={{
+            warning: <WarningIcon weight="bold" />,
+          }}
+          position="top-center"
+          className="toaster group"
+          style={
+            {
+              '--normal-bg': 'var(--popover)',
+              '--normal-text': 'var(--popover-foreground)',
+              '--normal-border': 'var(--border)',
+            } as React.CSSProperties
+          }
+        />
+      </AgentSessionProvider>
+    </LocaleProvider>
   );
 }

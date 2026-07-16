@@ -1,6 +1,7 @@
 import { DESIGN_SELECTION } from '@/app-config';
 import { VoicePicker } from '@/components/app/voice-picker';
 import { Button } from '@/components/ui/button';
+import { useStrings } from '@/lib/i18n';
 
 interface WelcomeViewProps {
   startButtonText: string;
@@ -20,6 +21,7 @@ export const WelcomeView = ({
   onStartCall,
   ref,
 }: React.ComponentProps<'div'> & WelcomeViewProps) => {
+  const strings = useStrings();
   // Designing a voice needs a description to design from.
   const startDisabled = selection === DESIGN_SELECTION && designInstruction.trim().length === 0;
 
@@ -27,14 +29,15 @@ export const WelcomeView = ({
     <div ref={ref}>
       <section className="bg-background mx-auto flex max-w-prose flex-col items-center justify-center px-6 py-10 text-center">
         <h1 className="text-foreground text-3xl leading-tight font-semibold tracking-tight md:text-4xl">
-          Hear Fish Audio&rsquo;s expressive voices
+          {strings.welcomeHeading}
         </h1>
 
         <p className="text-muted-foreground mt-4 max-w-prose text-base leading-relaxed text-pretty md:text-lg">
-          A voice agent powered by Fish Audio&rsquo;s expressive text-to-speech. Flip it between{' '}
-          <span className="text-foreground font-medium">casual</span> and{' '}
-          <span className="text-foreground font-medium">professional</span> to change style. Pick a
-          voice to start, clone your own, or design one from scratch.
+          {strings.descIntro}
+          <span className="text-foreground font-medium">{strings.descCasual}</span>
+          {strings.descMid}
+          <span className="text-foreground font-medium">{strings.descProfessional}</span>
+          {strings.descTail}
         </p>
 
         <VoicePicker

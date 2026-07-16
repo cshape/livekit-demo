@@ -45,7 +45,12 @@ CONV_SYSTEM = build_instructions() + "\n\n" + _CASUAL
 
 # (label, model, base_url|None, api_key) — base_url None => direct OpenAI.
 TARGETS = [
-    ("gpt-5.1", os.getenv("OPENAI_MODEL", "gpt-5.1"), None, os.getenv("OPENAI_API_KEY")),
+    (
+        "gpt-5.1",
+        os.getenv("OPENAI_MODEL", "gpt-5.1"),
+        None,
+        os.getenv("OPENAI_API_KEY"),
+    ),
     (
         "gemma-26b",
         os.getenv("LLM_MODEL", "google/gemma-4-26B-A4B-it"),
@@ -56,21 +61,57 @@ TARGETS = [
 
 # Representative user turns for the casual expressive demo, each with a little history.
 CONV_TURNS: list[tuple[str, list[dict]]] = [
-    ("opening follow-up", [{"role": "user", "content": "yeah hey! this is pretty cool. so what can you actually do?"}]),
+    (
+        "opening follow-up",
+        [
+            {
+                "role": "user",
+                "content": "yeah hey! this is pretty cool. so what can you actually do?",
+            }
+        ],
+    ),
     (
         "product question",
         [
             {"role": "user", "content": "this is pretty cool"},
-            {"role": "assistant", "content": "Oh, ha, thanks! Yeah, I'm a Fish Audio voice. What brought you by?"},
+            {
+                "role": "assistant",
+                "content": "Oh, ha, thanks! Yeah, I'm a Fish Audio voice. What brought you by?",
+            },
             {"role": "user", "content": "wait is this a real product or just a demo?"},
         ],
     ),
-    ("sad pivot (range)", [{"role": "user", "content": "honestly today's been rough. my dog's been really sick."}]),
-    ("how cloning works", [{"role": "user", "content": "so how does the voice cloning actually work?"}]),
-    ("longer ask", [{"role": "user", "content": "can you tell me a quick funny story about something?"}]),
+    (
+        "sad pivot (range)",
+        [
+            {
+                "role": "user",
+                "content": "honestly today's been rough. my dog's been really sick.",
+            }
+        ],
+    ),
+    (
+        "how cloning works",
+        [{"role": "user", "content": "so how does the voice cloning actually work?"}],
+    ),
+    (
+        "longer ask",
+        [
+            {
+                "role": "user",
+                "content": "can you tell me a quick funny story about something?",
+            }
+        ],
+    ),
     ("simple factual", [{"role": "user", "content": "what's the capital of france?"}]),
-    ("agree / backchannel", [{"role": "user", "content": "yeah i totally agree with that, makes sense."}]),
-    ("excited news", [{"role": "user", "content": "dude i just got the job i interviewed for!!"}]),
+    (
+        "agree / backchannel",
+        [{"role": "user", "content": "yeah i totally agree with that, makes sense."}],
+    ),
+    (
+        "excited news",
+        [{"role": "user", "content": "dude i just got the job i interviewed for!!"}],
+    ),
 ]
 
 # --- disfluency counting (on the spoken text, with markup stripped) ---------------
@@ -108,8 +149,11 @@ async def _stream_once(client: AsyncOpenAI, model: str, messages: list[dict]):
     out_tokens = 0
     parts: list[str] = []
     stream = await client.chat.completions.create(
-        model=model, messages=messages, stream=True,
-        stream_options={"include_usage": True}, **_kwargs_for(model),
+        model=model,
+        messages=messages,
+        stream=True,
+        stream_options={"include_usage": True},
+        **_kwargs_for(model),
     )
     async for chunk in stream:
         if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
@@ -126,15 +170,25 @@ def _fmt(samples: list[float]) -> str:
     s = sorted(samples)
     p50 = statistics.median(s)
     p90 = s[min(len(s) - 1, round(0.9 * (len(s) - 1)))]
-    return f"p50 {p50 * 1000:6.0f}ms  p90 {p90 * 1000:6.0f}ms  max {s[-1] * 1000:6.0f}ms"
+    return (
+        f"p50 {p50 * 1000:6.0f}ms  p90 {p90 * 1000:6.0f}ms  max {s[-1] * 1000:6.0f}ms"
+    )
 
 
-async def run_target(label: str, model: str, base_url: str | None, api_key: str | None) -> dict | None:
+async def run_target(
+    label: str, model: str, base_url: str | None, api_key: str | None
+) -> dict | None:
     if not api_key:
         print(f"\n### {label}: SKIPPED (missing api key)\n")
         return None
-    client = AsyncOpenAI(base_url=base_url, api_key=api_key) if base_url else AsyncOpenAI(api_key=api_key)
-    print(f"\n{'=' * 64}\n### {label}   model={model}   {'(self-hosted)' if base_url else '(openai)'}\n{'=' * 64}")
+    client = (
+        AsyncOpenAI(base_url=base_url, api_key=api_key)
+        if base_url
+        else AsyncOpenAI(api_key=api_key)
+    )
+    print(
+        f"\n{'=' * 64}\n### {label}   model={model}   {'(self-hosted)' if base_url else '(openai)'}\n{'=' * 64}"
+    )
     try:
         await _stream_once(client, model, [{"role": "user", "content": "hi"}])  # warm
     except Exception as e:
@@ -159,7 +213,9 @@ async def run_target(label: str, model: str, base_url: str | None, api_key: str 
                 agg[k] += d[k]
             n_replies += 1
         all_ttft.extend(ttfts)
-        tps = statistics.mean(t / tot for t, tot in zip(toks, totals, strict=False) if tot > 0)
+        tps = statistics.mean(
+            t / tot for t, tot in zip(toks, totals, strict=False) if tot > 0
+        )
         print(
             f"{tlabel:24}{statistics.median(ttfts) * 1000:7.0f}ms"
             f"{statistics.median(totals) * 1000:7.0f}ms{tps:8.0f}{statistics.mean(dis):13.1f}"
@@ -175,18 +231,26 @@ async def run_target(label: str, model: str, base_url: str | None, api_key: str 
 
 
 async def main() -> None:
-    print(f"prompt prefill ~{len(CONV_SYSTEM)} chars   reps {REPS}   turns {len(CONV_TURNS)}")
+    print(
+        f"prompt prefill ~{len(CONV_SYSTEM)} chars   reps {REPS}   turns {len(CONV_TURNS)}"
+    )
     results = []
     for t in TARGETS:
         r = await run_target(*t)
         if r:
             results.append(r)
     if len(results) >= 2:
-        print(f"\n{'=' * 64}\n### CROSS-MODEL DISFLUENCY (want these close)\n{'=' * 64}")
-        print(f"{'model':14}{'total':>8}{'filler':>8}{'stutter':>9}{'repeat':>8}{'hedge':>7}")
+        print(
+            f"\n{'=' * 64}\n### CROSS-MODEL DISFLUENCY (want these close)\n{'=' * 64}"
+        )
+        print(
+            f"{'model':14}{'total':>8}{'filler':>8}{'stutter':>9}{'repeat':>8}{'hedge':>7}"
+        )
         for r in results:
             p = r["per"]
-            print(f"{r['label']:14}{p['total']:8.2f}{p['filler']:8.2f}{p['stutter']:9.2f}{p['repeat']:8.2f}{p['hedge']:7.2f}")
+            print(
+                f"{r['label']:14}{p['total']:8.2f}{p['filler']:8.2f}{p['stutter']:9.2f}{p['repeat']:8.2f}{p['hedge']:7.2f}"
+            )
 
 
 if __name__ == "__main__":

@@ -25,17 +25,25 @@ load_dotenv(".env.local")
 FISH_BASE_URL = "https://api.fish.audio"
 MODEL = "s2.1-pro"
 
-# Keep in sync with PRESET_VOICES in src/agent.py and PRESET_VOICES in web/app-config.ts.
-PRESET_VOICES = {
-    "747b05c0add940baa95270cf68c0cc2e": "Stellan (American M)",
-    "41db1fc3c3624332bec9997ff3d3d353": "Maeve (British F)",
-    "9a3a69c63dbc4774ac41b03945229dc8": "Alistair (British M)",
-    "0e24ff9936d34df4bddce26398cf1311": "Maren (US F)",
+# A short one-liner for the preview, per language. The leading [happy] is a Fish
+# delivery cue (performed, not spoken) so the sample still sounds expressive.
+SAMPLE_TEXT = {
+    "en": "[happy] I'm one of Fish Audio's expressive voices.",
+    "ja": "[happy] 私はFish Audioの表現力豊かな声のひとつです。",
 }
 
-# A short one-liner for the preview. The leading [happy] is a Fish delivery cue
-# (performed, not spoken) so the sample still sounds expressive.
-SAMPLE_TEXT = "[happy] I'm one of Fish Audio's expressive voices."
+# Keep in sync with PRESET_VOICES in src/agent.py and PRESET_VOICES /
+# PRESET_VOICES_JA in web/app-config.ts. voice_id -> (label, lang).
+PRESET_VOICES = {
+    "747b05c0add940baa95270cf68c0cc2e": ("Stellan (American M)", "en"),
+    "41db1fc3c3624332bec9997ff3d3d353": ("Maeve (British F)", "en"),
+    "9a3a69c63dbc4774ac41b03945229dc8": ("Alistair (British M)", "en"),
+    "0e24ff9936d34df4bddce26398cf1311": ("Maren (US F)", "en"),
+    "297a6fd278df47c3b9da9bfdf55ac89a": ("さとる (Japanese M)", "ja"),
+    "88ee033403f24744965262d7369686e1": ("まり (Japanese F)", "ja"),
+    "8d7ac3b4f8cc4f7cbe2f39887e8c5247": ("丁寧な青年 (Japanese M)", "ja"),
+    "b2d9d8db057042688a5e318b8f405bc2": ("きょうこ (Japanese F)", "ja"),
+}
 
 OUT_DIR = (
     pathlib.Path(__file__).resolve().parents[2] / "web" / "public" / "voice-samples"
@@ -60,7 +68,9 @@ def _build_payload(text: str, voice_id: str) -> dict:
     }
 
 
-async def synth(session: aiohttp.ClientSession, api_key: str, voice_id: str) -> bytes:
+async def synth(
+    session: aiohttp.ClientSession, api_key: str, voice_id: str, text: str
+) -> bytes:
     async with session.post(
         f"{FISH_BASE_URL}/v1/tts",
         headers={
@@ -68,7 +78,7 @@ async def synth(session: aiohttp.ClientSession, api_key: str, voice_id: str) -> 
             "Content-Type": "application/msgpack",
             "model": MODEL,
         },
-        data=msgpack.packb(_build_payload(SAMPLE_TEXT, voice_id), use_bin_type=True),
+        data=msgpack.packb(_build_payload(text, voice_id), use_bin_type=True),
         timeout=aiohttp.ClientTimeout(total=60),
     ) as resp:
         resp.raise_for_status()
@@ -82,9 +92,9 @@ async def main() -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     async with aiohttp.ClientSession() as session:
-        for voice_id, label in PRESET_VOICES.items():
+        for voice_id, (label, lang) in PRESET_VOICES.items():
             print(f"synthesizing {label} ({voice_id}) ...")
-            audio = await synth(session, api_key, voice_id)
+            audio = await synth(session, api_key, voice_id, SAMPLE_TEXT[lang])
             out = OUT_DIR / f"{voice_id}.mp3"
             out.write_bytes(audio)
             print(f"  wrote {out} ({len(audio)} bytes)")

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
 import { headers } from 'next/headers';
+import { localizeAppConfig } from '@/app-config';
 import { ThemeProvider } from '@/components/app/theme-provider';
 import { ThemeToggle } from '@/components/app/theme-toggle';
 import { cn } from '@/lib/shadcn/utils';
@@ -55,13 +56,15 @@ interface RootLayoutProps {
 
 export default async function RootLayout({ children }: RootLayoutProps) {
   const hdrs = await headers();
-  const appConfig = await getAppConfig(hdrs);
+  // Locale is stamped onto the request by middleware.ts: 'ja' under /jp, else 'en'.
+  const locale = hdrs.get('x-locale') === 'ja' ? 'ja' : 'en';
+  const appConfig = localizeAppConfig(await getAppConfig(hdrs), locale);
   const styles = getStyles(appConfig);
   const { pageTitle, pageDescription } = appConfig;
 
   return (
     <html
-      lang="en"
+      lang={locale}
       suppressHydrationWarning
       className={cn(
         publicSans.variable,

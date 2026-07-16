@@ -11,6 +11,7 @@ import {
 } from '@livekit/components-react';
 import { MicrophoneIcon } from '@phosphor-icons/react/dist/ssr';
 import { AgentChatIndicator } from '@/components/agents-ui/agent-chat-indicator';
+import { useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 // Mirrors CLONE_READ_SECS in fish/src/agent.py; the agent also publishes it as
@@ -53,6 +54,7 @@ function CloneScriptCardInner({
   agent: RemoteParticipant;
   className?: string;
 }) {
+  const strings = useStrings();
   const state = useParticipantAttribute('clone.state', { participant: agent });
   const script = useParticipantAttribute('clone.script', { participant: agent }) ?? '';
   const rawReadSecs = useParticipantAttribute('clone.read_secs', { participant: agent });
@@ -97,7 +99,7 @@ function CloneScriptCardInner({
           {cloning ? (
             <div className="flex flex-col items-center gap-4 py-4">
               <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                Cloning your voice
+                {strings.cloneBuilding}
               </div>
               <AgentChatIndicator size="md" />
             </div>
@@ -105,9 +107,7 @@ function CloneScriptCardInner({
             <>
               <div className="text-muted-foreground flex items-center justify-center gap-2 text-xs font-medium tracking-wide uppercase">
                 <MicrophoneIcon weight="fill" className="size-4" />
-                {reading
-                  ? `Keep reading — cloning in ${Math.ceil(remaining)}s`
-                  : 'Read this aloud to clone your voice'}
+                {reading ? strings.cloneKeepReading(Math.ceil(remaining)) : strings.cloneReadPrompt}
               </div>
 
               <p className="text-foreground mt-4 text-center text-lg leading-relaxed text-pretty">

@@ -58,6 +58,8 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "B", "A", "C4", "UP", "SIM", "RUF"]
 ignore = ["E501"]  # Line too long (handled by formatter)
+# Full-width punctuation is correct inside the Japanese prompt/UI strings.
+allowed-confusables = ["！", "（", "）", "？", "：", "；", "，", "／"]
 
 [tool.ruff.format]
 quote-style = "double"

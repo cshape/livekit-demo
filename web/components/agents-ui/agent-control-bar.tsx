@@ -10,6 +10,7 @@ import {
   useInputControls,
   usePublishPermissions,
 } from '@/hooks/agents-ui/use-agent-control-bar';
+import { useStrings } from '@/lib/i18n';
 import { cn } from '@/lib/shadcn/utils';
 
 const LK_TOGGLE_VARIANT_1 = [
@@ -94,6 +95,7 @@ export function AgentControlBar({
   className,
   ...props
 }: AgentControlBarProps & ComponentProps<'div'>) {
+  const strings = useStrings();
   const publishPermissions = usePublishPermissions();
   const {
     microphoneTrack,
@@ -200,8 +202,8 @@ export function AgentControlBar({
                 'bg-destructive/10 dark:bg-destructive/10 text-destructive hover:bg-destructive/20 dark:hover:bg-destructive/20 focus:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/4 rounded-full font-mono text-xs font-bold tracking-wider'
             )}
           >
-            <span className="hidden md:inline">END CALL</span>
-            <span className="inline md:hidden">END</span>
+            <span className="hidden md:inline">{strings.endCall}</span>
+            <span className="inline md:hidden">{strings.endCallShort}</span>
           </AgentDisconnectButton>
         )}
       </div>

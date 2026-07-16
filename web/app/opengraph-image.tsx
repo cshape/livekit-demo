@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { getAppConfig } from '@/lib/utils';
 
 // Image metadata
-export const alt = "Fish Audio expressive voice demo";
+export const alt = 'Fish Audio expressive voice demo';
 export const size = {
   width: 1200,
   height: 628,

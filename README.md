@@ -1,10 +1,12 @@
 # Expressive voice agent demo
 
 A small voice agent that shows off [Fish Audio](https://fish.audio)'s
-**expressive** text-to-speech. Pick one of four preset voices (or clone your own
-by reading a short script), then flip it between casual and professional mid-call
-with an on-screen toggle and watch its mood shift in real time. Powered
-by [Fish Audio](https://fish.audio), [AssemblyAI](https://www.assemblyai.com),
+**expressive** text-to-speech. Pick one of four preset voices, clone your own
+by reading a short script, or design a brand-new voice from a text description —
+then flip the agent between casual and professional mid-call with an on-screen
+toggle and watch its mood shift in real time. The whole demo is also available
+fully localized in Japanese at `/jp`. Powered by
+[Fish Audio](https://fish.audio), [Deepgram](https://deepgram.com),
 [OpenAI](https://openai.com), and
 [LiveKit Agents](https://docs.livekit.io/agents/).
 
@@ -20,7 +22,7 @@ Dockerfile), so you can run the whole thing together or grab just one half.
 ## Prereqs
 
 - A [LiveKit Cloud](https://cloud.livekit.io) project (free tier is plenty)
-- API keys for [Fish Audio](https://fish.audio), [AssemblyAI](https://www.assemblyai.com), and [OpenAI](https://platform.openai.com)
+- API keys for [Fish Audio](https://fish.audio), [Deepgram](https://console.deepgram.com), and [OpenAI](https://platform.openai.com)
 - Then either [Docker](https://docs.docker.com/get-started/get-docker/) (Compose path) **or**
   [`uv`](https://docs.astral.sh/uv/getting-started/installation/) + [`pnpm`](https://pnpm.io/installation) (Node 20+) for the local path
 
@@ -105,9 +107,9 @@ in `src/agent.py` and must match `agentName` in `web/app-config.ts`.
 ## How it works
 
 - **Pick a voice up front.** The landing page offers four preset Fish Audio
-  voices (with audio previews) or "clone your voice." That choice rides agent
-  metadata to the worker via named dispatch, so the agent starts in the chosen
-  voice.
+  voices (with audio previews), "clone your voice," or "design a voice." That
+  choice rides agent metadata to the worker via named dispatch, so the agent
+  starts in the chosen voice.
 - **Expressive by default.** The agent opens in a casual register. You flip it
   between casual and professional with an on-screen toggle, which sends a
   `set_mode` RPC that swaps the agent's expressive preset at runtime and has it
@@ -116,10 +118,22 @@ in `src/agent.py` and must match `agentName` in `web/app-config.ts`.
   agent talks). Delivery is shaped with the SDK's expressive markup, converted to
   Fish Audio's native form for audio and stripped from the transcript.
 - **Clone-first (optional).** If you choose "clone your voice," the agent shows a
-  short script and captures ~12 seconds as you read it (highlighting words live
-  from streaming STT), clones your voice via Fish Audio's `/model` endpoint
-  (`train_mode=fast`), switches the TTS into it, and greets you in your own voice.
-  The clone and the recording are deleted from Fish when the call ends.
+  short script and records you reading it for a fixed 15-second window (a
+  countdown mirrors it on screen), VAD-trims the capture, clones your voice via
+  Fish Audio's `/model` endpoint (`train_mode=fast`), switches the TTS into it,
+  and greets you in your own voice. The clone and the recording are deleted from
+  Fish when the call ends. The cloning logic lives in
+  [`fish/src/voice_clone.py`](fish/src/voice_clone.py) (capture, VAD trim, Fish
+  API calls) and the call flow in `Assistant.run_clone_first` in
+  [`fish/src/agent.py`](fish/src/agent.py).
+- **Design-first (optional).** "Design a voice" takes a short text description,
+  generates a candidate via Fish's voice-design API, registers it as a private
+  TTS model, and greets you in it — all while a spoken ack covers the ~5s build.
+  Designed voices are deleted when the call ends, like clones.
+- **Japanese version.** `/jp` serves the same demo fully localized: Japanese UI,
+  prompts, greetings, clone script, mood words, four Japanese preset voices, and
+  Deepgram Flux's multilingual model (`flux-general-multi`, `language_hint=ja`)
+  for STT — the same turn-detection and latency pipeline as English.
 
 See `fish/CLAUDE.md` for the full agent-side flow and `fish/src/agent.py` for
 the code.

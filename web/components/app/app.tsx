@@ -18,7 +18,6 @@ import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { type Locale, LocaleProvider, UI_STRINGS } from '@/lib/i18n';
-import { cn } from '@/lib/shadcn/utils';
 import { clearTokenCache, createCachingTokenSource } from '@/lib/token-source';
 import { getSandboxTokenSource } from '@/lib/utils';
 
@@ -33,8 +32,8 @@ interface AppProps {
   /** Page locale: 'en' on /, 'ja' on /jp. Drives UI strings, the preset voice
    * list, and the `lang` the agent worker localizes its side against. */
   locale?: Locale;
-  /** When set, a fixed branded header (logo + this title) persists across the
-   * welcome and in-call views. Used by /cloning. */
+  /** When set, a branded header (logo + this title) is shown during the in-call
+   * cloning workflow (not the welcome screen). Used by /cloning. */
   headerTitle?: string;
   /** Landing-page selection to preselect instead of the locale's first preset
    * (e.g. CLONE_SELECTION on /cloning). */
@@ -138,15 +137,11 @@ export function App({ appConfig, locale = 'en', headerTitle, initialSelection }:
     <LocaleProvider locale={locale}>
       <AgentSessionProvider session={session}>
         <AppSetup />
-        {headerTitle && <AppHeader title={headerTitle} />}
-        {/* With the h-16 header in flow, size main to the remaining viewport so
-            the welcome view centers without hiding under it. */}
-        <main
-          className={cn(
-            'grid grid-cols-1 place-content-center',
-            headerTitle ? 'min-h-[calc(100svh-4rem)]' : 'h-svh'
-          )}
-        >
+        {/* Branded header only during the cloning workflow (the in-call
+            conversation), not on the welcome/selection screen. It's a fixed
+            overlay above the in-call view (which is fixed inset-0). */}
+        {headerTitle && session.isConnected && <AppHeader title={headerTitle} />}
+        <main className="grid h-svh grid-cols-1 place-content-center">
           <ErrorBoundary>
             <ViewController
               appConfig={appConfig}

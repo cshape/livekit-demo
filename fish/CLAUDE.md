@@ -123,7 +123,7 @@ The site is served in English at `/` and fully localized Japanese at `/jp` (buil
 
 - **Web**: `web/middleware.ts` stamps `x-locale` (`ja` under `/jp`) so `app/layout.tsx` can set `<html lang>` + the localized `<title>`/description (`localizeAppConfig` in `app-config.ts`). `app/jp/page.tsx` renders `<App locale="ja">`; a `LocaleProvider` (`web/lib/i18n.tsx`) carries the locale to every component — **all UI strings live in `UI_STRINGS` there**, and the JP preset voices in `PRESET_VOICES_JA` (`app-config.ts`).
 - **Metadata**: the frontend adds `"lang": "ja"` (or `"en"`) to the agent metadata JSON alongside `voice`/`clone`/`design`.
-- **Worker**: `my_agent` parses `lang` (unknown → `"en"`). Everything localized is keyed by it: `PRESET_VOICES`/`DEFAULT_VOICE_ID`, `CORE_INSTRUCTIONS`, all greeting instructions, `CLONE_SCRIPT`/`CLONE_PROMPT_LINE`/`CLONE_BUILD_ACKS`, the design prompts, and `_MOOD_SYSTEM_PROMPT` (JP sessions get Japanese mood words for the ring). `Assistant(lang=...)` threads it through the flows.
+- **Worker**: `my_agent` parses `lang` (unknown → `"en"`). Everything localized is keyed by it: `PRESET_VOICES`/`DEFAULT_VOICE_ID`, `CORE_INSTRUCTIONS`, all greeting instructions, `CLONE_SCRIPTS`/`CLONE_PROMPT_LINE`/`CLONE_BUILD_ACKS`, the design prompts, and `_MOOD_SYSTEM_PROMPT` (JP sessions get Japanese mood words for the ring). `Assistant(lang=...)` threads it through the flows.
 - **STT**: Japanese sessions use Deepgram **`flux-general-multi`** with `language_hint=["ja"]` — same conversational Flux API (native EndOfTurn/EagerEndOfTurn), so turn handling and preemptive TTS are identical to English. English stays on `flux-general-en`.
 - **fish dot audio linkification**: the JA prompt still tells the agent to write the URL as the ASCII words "fish dot audio" so `agent-chat-transcript.tsx`'s regex keeps working inside Japanese text.
 - Full-width Japanese punctuation in prompt strings is allowlisted via `allowed-confusables` in `pyproject.toml` (ruff RUF001).
@@ -151,6 +151,7 @@ Don't reuse the built-in `lk.agent.state` attribute (`listening`/`thinking`/`spe
 
 Cloning is **upfront-only** — there is no opportunistic mid-conversation clone anymore (no `clone_my_voice` tool). `Assistant.run_clone_first(session, ctx)` runs the whole thing as a straight-line coroutine with a **fixed read window**:
 
+0. The read script is `random.choice(CLONE_SCRIPTS[lang])` — 10 per language, all about the same length to speak, so repeat demos don't hear the same passage. It's published as `clone.script` for the card; it is **never** sent to Fish as a reference transcript (see step 6).
 1. `install_capture(session)` tees `session.input.audio` through `PassthroughCaptureAudioInput` (forwards every frame, buffers when `tee.recording` — toggled by `user_state_changed` speaking/not-speaking — hard-capped at `CAPTURE_MAX_SECS=30`). `_suppress_replies = True`.
 2. Publish `clone.script` + `clone.read_secs` + `clone.state="prompt"`, `await ctx.connect()` (so the mic is live), then `session.say(CLONE_PROMPT_LINE)` in the starting preset voice and **wait for its playout**.
 3. `clone.state="reading"`, then simply `await asyncio.sleep(CLONE_READ_SECS)` (15s). No STT matching, no speech-time targets — the frontend mirrors the same countdown, and anything the user said during the prompt line is already buffered.

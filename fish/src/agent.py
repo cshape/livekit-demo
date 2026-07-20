@@ -80,21 +80,77 @@ DEFAULT_VOICE_ID: dict[str, str] = {
 }
 
 # --- Clone-first flow --------------------------------------------------------
-# When the user picks "clone your voice" on the landing page, they read this
-# script aloud at the start of the call; we capture it, clone, and switch into
-# their voice before the real conversation begins. ~50 words — more than fits in
-# the CLONE_READ_SECS window, so nobody runs out of script mid-countdown. No
-# bracket markers — the user reads it verbatim.
-CLONE_SCRIPT: dict[str, str] = {
+# When the user picks "clone your voice" on the landing page, they read one of
+# these scripts aloud at the start of the call; we capture it, clone, and switch
+# into their voice before the real conversation begins. One is picked at random
+# per session so repeat demos don't hear the same passage. Each is ~50 words /
+# ~100 JA characters — deliberately more than fits in the CLONE_READ_SECS window
+# and all about the same length to speak, so nobody runs out of script
+# mid-countdown. No bracket markers — the user reads it verbatim.
+CLONE_SCRIPTS: dict[str, tuple[str, ...]] = {
     "en": (
         "The quick morning light spread over the harbor as the boats headed out to sea. "
         "Honestly, there's nothing like a fresh cup of coffee and a clear blue sky to get "
-        "the day going. I could talk about this stuff for hours — but let's hear how it sounds."
+        "the day going. I could talk about this stuff for hours — but let's hear how it sounds.",
+        "I never really planned the trip, but somehow the weekend turned into a long drive "
+        "up the coast. We stopped for sandwiches, took a hundred pictures of the same bridge, "
+        "and got home late. That's my favorite kind of day — let's hear how this sounds.",
+        "There's a small bookstore near my office with a cat that sleeps in the front window "
+        "all afternoon. I go in for one thing and leave with four, and the owner just laughs "
+        "at this point. Anyway, that's enough from me — let's hear how this sounds.",
+        "Every summer the neighbors set up a long table in the driveway and everybody brings "
+        "something. Someone always burns the bread, someone always forgets the ice, and it's "
+        "great regardless. We stay out talking until dark. Alright — let's hear how this sounds.",
+        "I've been trying to learn piano again, which mostly means sitting down for ten minutes "
+        "and then getting distracted. Still, the slow parts are starting to sound like actual "
+        "music. My teacher might disagree. Okay, that's all I've got — let's hear how this sounds.",
+        "The train into the city takes about forty minutes, just long enough to read a chapter "
+        "or fall asleep against the window. Most mornings it's the second one. The view along "
+        "the river is worth staying awake for. That's plenty — let's hear how this sounds.",
+        "We hiked up the ridge before sunrise because someone promised the view would be worth "
+        "it. It was freezing, the trail was steeper than advertised, and yes, it absolutely was "
+        "worth it. I'd go again tomorrow. Anyway, that's enough — let's hear how this sounds.",
+        "My grandmother made the same soup every winter and never once wrote the recipe down. "
+        "I've tried to copy it a dozen times and it always comes out close but not quite right. "
+        "Someday I'll get it. Alright, that covers it — let's hear how this sounds.",
+        "There's a park by the water where people run, walk their dogs, and argue about chess at "
+        "the same three tables. I mostly sit and watch. It's a good way to spend an hour doing "
+        "nothing useful at all. Okay, that's enough — let's hear how this sounds.",
+        "The storm knocked the power out for a whole evening, so we lit candles and played cards "
+        "like it was a hundred years ago. Nobody checked a phone once. Honestly, it was the best "
+        "night all month. Alright, that should do it — let's hear how this sounds.",
     ),
     "ja": (
         "朝の光が港いっぱいに広がって、船が次々と海へ出ていきます。"
         "やっぱり、淹れたてのコーヒーと青い空があれば、一日のはじまりは最高ですね。"
-        "こういう話なら何時間でもできますが、まずはどんな声になるか聞いてみましょう。"
+        "こういう話なら何時間でもできますが、まずはどんな声になるか聞いてみましょう。",
+        "先週末は特に予定もなかったのに、気がついたら海沿いをずっとドライブしていました。"
+        "同じ橋を何枚も写真に撮って、家に着いたのは夜遅くでした。"
+        "こういう一日がいちばん好きなんですよね。では、どんな声になるか聞いてみましょう。",
+        "会社の近くに小さな本屋があって、昼間はいつも猫が窓辺で寝ています。"
+        "一冊だけ買うつもりが、気づけば四冊も抱えて出てくるんです。"
+        "店主にはすっかり笑われています。さて、そろそろどんな声になるか聞いてみましょう。",
+        "夏になると、近所の人たちが駐車場に長いテーブルを出して、それぞれ一品ずつ持ち寄ります。"
+        "誰かが必ずパンを焦がして、誰かが必ず氷を忘れる。それでも毎年楽しいんです。"
+        "暗くなるまで話し込みますね。では、どんな声になるか聞いてみましょう。",
+        "最近またピアノを練習していますが、たいてい十分ほど座って、すぐ気が散ってしまいます。"
+        "それでもゆっくりした曲は、少しずつ音楽らしく聞こえてきました。"
+        "先生の意見は違うかもしれませんね。では、どんな声になるか聞いてみましょう。",
+        "街まで電車で四十分ほど、本を一章読むか、窓にもたれて眠るにはちょうどいい長さです。"
+        "朝はたいてい眠ってしまいますが、川沿いの景色は起きている価値があります。"
+        "このくらいにして、そろそろどんな声になるか聞いてみましょう。",
+        "日の出前に尾根まで登りました。景色がすばらしいと聞いたからです。"
+        "とても寒くて、道は思ったよりずっと急でしたが、たしかに登ってよかったと思える眺めでした。"
+        "また明日でも行きたいくらいです。では、どんな声になるか聞いてみましょう。",
+        "祖母は毎年冬に同じスープを作っていましたが、作り方を書き残してはくれませんでした。"
+        "何度まねしても、近いけれど何かが足りないんです。"
+        "いつかきっと同じ味にしてみせます。では、そろそろどんな声になるか聞いてみましょう。",
+        "水辺の公園では、走る人、犬を散歩させる人、いつも同じ席で将棋の手を言い合う人たちがいます。"
+        "わたしはたいてい座って眺めているだけです。何もしない一時間も悪くありません。"
+        "では、どんな声になるか聞いてみましょう。",
+        "嵐で一晩じゅう停電してしまったので、ろうそくを灯してトランプをしました。"
+        "まるで百年前の夜みたいで、誰も携帯を見ませんでした。"
+        "正直、今月でいちばん楽しい夜でしたね。では、どんな声になるか聞いてみましょう。",
     ),
 }
 # Fixed read window: once the read prompt finishes playing we publish
@@ -714,7 +770,8 @@ class Assistant(Agent):
         # Publish the script for the on-screen card, connect so the mic is live, then
         # prompt the read (in the starting preset voice) and let it finish playing.
         await self._set_clone_attrs(
-            script=CLONE_SCRIPT[self._lang], read_secs=f"{CLONE_READ_SECS:.0f}"
+            script=random.choice(CLONE_SCRIPTS[self._lang]),
+            read_secs=f"{CLONE_READ_SECS:.0f}",
         )
         await self._set_clone_state("prompt")
         await ctx.connect()

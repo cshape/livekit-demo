@@ -9,7 +9,7 @@ export function AppHeader({ title }: { title: string }) {
     <header className="bg-background fixed inset-x-0 top-0 z-50 flex min-h-16 items-center pt-4 md:pt-6">
       <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-4 py-3 md:px-6">
         <FishAudioLogo className="w-12 shrink-0 md:w-16" />
-        <div className="text-foreground text-right text-base leading-tight font-semibold text-balance tracking-tight md:text-2xl lg:text-3xl">
+        <div className="text-foreground text-right text-base leading-tight font-semibold tracking-tight text-balance md:text-2xl lg:text-3xl">
           {title}
         </div>
       </div>

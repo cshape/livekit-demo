@@ -9,6 +9,9 @@ interface WelcomeViewProps {
   onSelectionChange: (selection: string) => void;
   designInstruction: string;
   onDesignInstructionChange: (value: string) => void;
+  /** /chat-to-clone: focused single-purpose welcome — swap the copy and drop the
+   * voice picker (there's nothing to pick). */
+  chatClone?: boolean;
   onStartCall: () => void;
 }
 
@@ -18,6 +21,7 @@ export const WelcomeView = ({
   onSelectionChange,
   designInstruction,
   onDesignInstructionChange,
+  chatClone = false,
   onStartCall,
   ref,
 }: React.ComponentProps<'div'> & WelcomeViewProps) => {
@@ -29,23 +33,31 @@ export const WelcomeView = ({
     <div ref={ref}>
       <section className="bg-background mx-auto flex max-w-prose flex-col items-center justify-center px-6 py-10 text-center">
         <h1 className="text-foreground text-3xl leading-tight font-semibold tracking-tight md:text-4xl">
-          {strings.welcomeHeading}
+          {chatClone ? strings.chatCloneHeading : strings.welcomeHeading}
         </h1>
 
-        <p className="text-muted-foreground mt-4 max-w-prose text-base leading-relaxed text-pretty md:text-lg">
-          {strings.descIntro}
-          <span className="text-foreground font-medium">{strings.descCasual}</span>
-          {strings.descMid}
-          <span className="text-foreground font-medium">{strings.descProfessional}</span>
-          {strings.descTail}
-        </p>
+        {chatClone ? (
+          <p className="text-muted-foreground mt-4 max-w-prose text-base leading-relaxed text-pretty md:text-lg">
+            {strings.chatCloneDescription}
+          </p>
+        ) : (
+          <p className="text-muted-foreground mt-4 max-w-prose text-base leading-relaxed text-pretty md:text-lg">
+            {strings.descIntro}
+            <span className="text-foreground font-medium">{strings.descCasual}</span>
+            {strings.descMid}
+            <span className="text-foreground font-medium">{strings.descProfessional}</span>
+            {strings.descTail}
+          </p>
+        )}
 
-        <VoicePicker
-          selection={selection}
-          onSelectionChange={onSelectionChange}
-          designInstruction={designInstruction}
-          onDesignInstructionChange={onDesignInstructionChange}
-        />
+        {!chatClone && (
+          <VoicePicker
+            selection={selection}
+            onSelectionChange={onSelectionChange}
+            designInstruction={designInstruction}
+            onDesignInstructionChange={onDesignInstructionChange}
+          />
+        )}
 
         <Button
           size="lg"

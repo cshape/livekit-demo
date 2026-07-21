@@ -190,6 +190,78 @@ CLONE_BUILD_ACKS: dict[str, list[str]] = {
     ],
 }
 
+# --- Chat-to-clone flow ------------------------------------------------------
+# The /chat-to-clone page revives the older "clone while chatting" experience:
+# instead of reading a fixed script, the user just has a normal expressive
+# conversation, and once we've silently captured ~CHAT_CLONE_THRESHOLD_SECS of
+# their speech the controller clones them and switches into their voice mid-chat.
+# Unlike clone-first (a fixed read window) this is triggered by *cumulative*
+# speech across turns, so it's driven from the capture tee's user_state_changed
+# handler rather than a straight-line coroutine. Auto-fires (no LLM tool): on a
+# dedicated cloning page the user's intent is unambiguous.
+CHAT_CLONE_THRESHOLD_SECS = 10.0
+
+# Appended to CORE for chat-to-clone sessions (until the swap happens). Tells the
+# agent to invite the user to talk, keep them going, and nudge them along with the
+# hidden capture-status note — but never to try cloning itself (the controller does
+# it automatically). After the swap, the standard CLONED_VOICE_NOTE replaces this.
+CHAT_CLONE_NOTE: dict[str, str] = {
+    "en": (
+        "CLONING CHAT: this is a live voice-cloning demo. Early on, warmly invite the user to just "
+        "talk to you for about ten seconds so you can clone their voice and play it right back — "
+        'keep it casual, like "talk to me for ten seconds or so and I\'ll clone your voice." Then '
+        "keep an easy back-and-forth going with one genuine question at a time so they keep talking. "
+        "A hidden note each turn tells you roughly how many of the ten seconds you've captured — use "
+        'it to nudge them along naturally ("almost there", "just a bit more") without ever reading '
+        "the number out. You do NOT trigger the clone yourself and have no tool or command for it — "
+        "it happens automatically the moment there's enough audio, and you'll simply find yourself "
+        "speaking in their cloned voice. Never claim you can clone on command and never ask them to "
+        "read a script or repeat a phrase."
+    ),
+    "ja": (
+        "クローン会話: これはライブのボイスクローン体験です。会話の早い段階で、あなたの声をクローンして"
+        "すぐ聞かせられるように、10秒ほど話してほしいと温かく誘ってください（「10秒くらい話してくれたら"
+        "声をクローンするよ」といった軽い感じで）。あとは一度にひとつの自然な質問で、相手が話し続けられる"
+        "ように会話をリードします。毎ターン、これまでに何秒ぶん録れたかを伝える隠しメモが届きます。それを"
+        "使って「もう少し」「いい調子」などと自然に促してください。数字をそのまま読み上げないこと。"
+        "クローンはあなた自身が起動するのではなく、ツールもコマンドもありません。十分な音声が集まった"
+        "瞬間に自動で行われ、気づけばあなたはその人のクローン音声で話しています。「頼まれればクローン"
+        "できる」と言ったり、スクリプトを読ませたりフレーズを繰り返させたりしないこと。"
+    ),
+}
+
+# Opening line for a chat-to-clone session — invites the user to start talking.
+# Kept deliberately tight so the LLM lands a single upbeat sentence, not a spiel.
+CHAT_CLONE_GREETING: dict[str, str] = {
+    "en": (
+        "In ONE short, upbeat sentence, say hi and invite them to just chat with you while you clone "
+        "their voice in the background — casual and fun, e.g. \"hey, let's chat — I'll clone your voice "
+        "while we talk!\" Just that one line: no questions, and don't mention modes or toggles."
+    ),
+    "ja": (
+        "短く明るい1文だけで、挨拶して、話しているあいだに声をクローンするから気軽に話しかけてね、"
+        "と誘ってください（例：「やあ、話そうよ — そのあいだに声をクローンするね！」）。その1文だけ。"
+        "質問はせず、モードやトグルにも触れないこと。"
+    ),
+}
+
+
+def chat_clone_capture_note(captured_secs: float, lang: str = "en") -> str:
+    """A one-line, per-turn system note telling the agent how much of the user's
+    voice is buffered so it can nudge them naturally without reading the number out."""
+    remaining = max(0, round(CHAT_CLONE_THRESHOLD_SECS - captured_secs))
+    if lang == "ja":
+        return (
+            f"音声キャプチャ状況: これまでに約{captured_secs:.0f}秒ぶん録れました"
+            f"（クローンにはあと{remaining}秒ほど必要）。自然なら「もう少し」「いい調子」などと"
+            "促してかまいませんが、この数字をそのまま読み上げないこと。"
+        )
+    return (
+        f"Voice-capture status: about {captured_secs:.0f}s of the user's voice is captured "
+        f"(~{remaining}s more needed before the clone fires). If it's natural, nudge them to keep "
+        "talking a little more, but never read this number out loud as a stat."
+    )
+
 
 # --- TTS pronunciation -------------------------------------------------------
 # Fish mis-says "LiveKit" with a short-i ("liv-kit"). We rewrite it in the TTS path
@@ -421,6 +493,28 @@ CLONED_VOICE_NOTE: dict[str, str] = {
 }
 
 
+# Same as CLONED_VOICE_NOTE, but for /chat-to-clone: the clone came from the user
+# simply talking, not a scripted read — so the phrasing must not mention a script.
+CHAT_CLONE_VOICE_NOTE: dict[str, str] = {
+    "en": (
+        "VOICE NOTE: you are speaking in a clone of the user's OWN voice, made just now from the "
+        "first several seconds of them talking with you. It's a quick, temporary demo clone — it and "
+        "the recording are deleted when this call ends. If they want a permanent, higher-quality clone "
+        "with more control, point them to fish dot audio (say it as the three words 'fish dot audio'; a "
+        "clickable link appears in the transcript). Don't dwell on the cloning or pretend to be the "
+        "user — keep the focus on expressive speech, your modes, and moods."
+    ),
+    "ja": (
+        "ボイスに関するメモ: あなたは今、ユーザー本人の声のクローンで話しています。通話の最初の"
+        "数秒間、あなたと話してくれた声から、たった今作られたものです。これは一時的なデモ用の"
+        "クローンで、録音もクローンも通話終了時に削除されます。より高品質で自由度の高い本格的な"
+        "クローンを望むなら、fish dot audio を案内してください（英語の3語でそのまま書くこと。"
+        "トランスクリプトにはクリックできるリンクが表示されます）。クローンの話を引っ張ったり、"
+        "ユーザー本人になりすましたりしないこと。話題の中心はあくまで表現力豊かな音声とモードです。"
+    ),
+}
+
+
 DESIGNED_VOICE_NOTE: dict[str, str] = {
     "en": (
         "VOICE NOTE: you are speaking in a voice the user just DESIGNED from a short written "
@@ -441,20 +535,29 @@ DESIGNED_VOICE_NOTE: dict[str, str] = {
 
 
 def build_instructions(
-    lang: str = "en", cloned: bool = False, designed: bool = False
+    lang: str = "en",
+    cloned: bool = False,
+    designed: bool = False,
+    chat_clone: bool = False,
 ) -> str:
     """Assemble the system prompt: CORE plus, for clone/design sessions, a slim note.
 
     Register and mood no longer live in the instructions — they're carried by the
     expressive preset (see `_expressive_for`). When `cloned` (or `designed`) is set, a
     note is appended so the agent knows whose voice it's speaking in and keeps the fish
-    dot audio CTA. Preset-voice sessions never include any cloning/design text.
+    dot audio CTA. `chat_clone` adds the "invite them to talk / it clones itself" note
+    used by the /chat-to-clone flow *before* the voice swap; once cloned, the caller
+    rebuilds with `cloned=True` instead. Preset-voice sessions include none of these.
     """
     parts = [CORE_INSTRUCTIONS[lang]]
     if cloned:
-        parts.append(CLONED_VOICE_NOTE[lang])
+        # A chat-to-clone clone came from the user just talking, so its note must not
+        # mention a script; clone-first (scripted read) keeps the original wording.
+        parts.append((CHAT_CLONE_VOICE_NOTE if chat_clone else CLONED_VOICE_NOTE)[lang])
     if designed:
         parts.append(DESIGNED_VOICE_NOTE[lang])
+    if chat_clone and not cloned:
+        parts.append(CHAT_CLONE_NOTE[lang])
     return "\n\n".join(p.strip() for p in parts)
 
 
@@ -486,6 +589,23 @@ CLONE_REVEAL_GREETING: dict[str, str] = {
         "話しています。1〜2文で: 温かく挨拶し、これがあなた自身のクローンされた声ですよと伝え、"
         "調子はどうかなど好奇心のある質問で相手に話を向けてください。モードやトグルには触れず、"
         "クローンの説明をしすぎないこと。"
+    ),
+}
+# Reveal greeting for /chat-to-clone — the clone came from the user just talking (no
+# script), and it lands mid-conversation, so it reacts to that moment instead.
+CHAT_CLONE_REVEAL_GREETING: dict[str, str] = {
+    "en": (
+        "You are NOW speaking in a clone of the user's own voice, just built from the first few seconds "
+        "of them talking with you. In one or two short sentences: react with a little delight, point out "
+        "that this is their own cloned voice you're speaking in now, then turn it back to them with a "
+        "curious question like how it sounds or how strange it is to hear themselves. Don't mention modes "
+        "or toggles, and don't over-explain the cloning."
+    ),
+    "ja": (
+        "あなたは今この瞬間から、通話の最初の数秒間あなたと話してくれた声から作られた、本人の声の"
+        "クローンで話しています。1〜2文で: 少し嬉しそうに反応し、これは今あなたが話しているあなた"
+        "自身のクローン音声ですよと伝え、どう聞こえるか、自分の声を聞くのは変な感じかなど、好奇心の"
+        "ある質問で相手に話を向けてください。モードやトグルには触れず、クローンの説明をしすぎないこと。"
     ),
 }
 # Greeting when cloning was skipped/failed — stays in the starting preset voice.
@@ -585,20 +705,23 @@ def build_tts(voice_id: str):
 
 
 class Assistant(Agent):
-    def __init__(self, lang: str = "en") -> None:
+    def __init__(self, lang: str = "en", chat_clone: bool = False) -> None:
         # The register starts casual; the user flips it at runtime via the on-screen
         # toggle (set_mode RPC -> apply_mode), which swaps the expressive preset.
         self._mode: str = "casual"
         # Session language ("en"/"ja") — chosen on the landing page (/ vs /jp) and
         # delivered via agent metadata. Drives every localized string below.
         self._lang: str = lang if lang in SUPPORTED_LANGS else "en"
+        # /chat-to-clone session: converse normally while silently buffering the
+        # user's voice, then auto-clone once ~CHAT_CLONE_THRESHOLD_SECS is captured.
+        self._chat_clone: bool = chat_clone
         super().__init__(
             # Provider chosen by env (see llm.build_llm): our own OpenAI-compatible
             # endpoint when LLM_BASE_URL is set, else direct OpenAI gpt-5.1 (which
             # follows the expressive markup well). The mood classifier below stays on
             # direct OpenAI regardless.
             llm=build_llm(default_openai_model="gpt-5.1"),
-            instructions=build_instructions(self._lang),
+            instructions=build_instructions(self._lang, chat_clone=chat_clone),
             # Drives the SDK expressive pipeline: injects the register's markup
             # authoring guidance per turn and converts/strips the tags. Per-Agent
             # `expressive` overrides the session; apply_mode mutates it via
@@ -624,6 +747,17 @@ class Assistant(Agent):
         # we suppress agent replies (on_user_turn_completed raises StopResponse) so
         # the setup flow drives all speech.
         self._suppress_replies: bool = False
+        # --- Chat-to-clone capture accounting (only used when self._chat_clone) ---
+        # Cumulative seconds of user speech buffered so far; the auto-clone fires when
+        # it crosses CHAT_CLONE_THRESHOLD_SECS. Tracked across turns via the capture
+        # tee's user_state_changed handler.
+        self._cumulative_speech_secs: float = 0.0
+        self._speech_started_at: float | None = None
+        self._chat_clone_ready: bool = False
+        self._chat_clone_started: bool = False
+        # Id of the one-line capture-status note we injected last turn, so we can drop
+        # it before injecting a fresh one (the LLM sees exactly one current nudge).
+        self._injected_msg_id: str | None = None
         # Non-destructive attribute writes: the rtc `set_attributes` clobbers keys
         # you don't pass, so we re-send our own attrs + the live `lk.agent.state`
         # on every write. Without this, our clone/design/style writes race the SDK's
@@ -699,9 +833,30 @@ class Assistant(Agent):
     ) -> None:
         """While the user is reading the clone script (or the designed voice is still
         building), suppress the agent's reply so it doesn't talk over the setup flow —
-        the controller drives all speech in that window. Otherwise a no-op."""
+        the controller drives all speech in that window. For a chat-to-clone session,
+        refresh the one-line capture-status nudge so the agent knows how close the
+        clone is (best-effort; the auto-clone trigger doesn't depend on it)."""
+        if self._chat_clone and not self._cloned and not self._chat_clone_started:
+            self._refresh_capture_note(turn_ctx)
         if self._suppress_replies:
             raise StopResponse()
+
+    def _refresh_capture_note(self, turn_ctx: ChatContext) -> None:
+        """Drop last turn's capture-status note and inject a fresh one, so the LLM
+        only ever sees the single current nudge instead of a growing stack."""
+        if self._injected_msg_id is not None:
+            try:
+                idx = turn_ctx.index_by_id(self._injected_msg_id)
+                if idx is not None:
+                    turn_ctx.items.pop(idx)
+            except Exception:
+                logger.exception("failed to drop previous capture note")
+            self._injected_msg_id = None
+        msg = turn_ctx.add_message(
+            role="system",
+            content=chat_clone_capture_note(self._cumulative_speech_secs, self._lang),
+        )
+        self._injected_msg_id = msg.id
 
     async def on_user_turn_exceeded(self, ev) -> None:
         """Default behavior cuts in with a reply when the user speaks too long; while
@@ -725,6 +880,142 @@ class Assistant(Agent):
             tee.recording = ev.new_state == "speaking"
 
         session.on("user_state_changed", _on_user_state_changed)
+
+    def _spawn(self, coro) -> None:
+        """Fire-and-forget a coroutine, keeping a strong ref so the loop doesn't GC
+        it mid-flight (mirrors the mood-task bookkeeping)."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def install_chat_clone_capture(self, session: AgentSession) -> None:
+        """Chat-to-clone capture: tee the mic like `install_capture`, but also track
+        *cumulative* speaking time across turns and auto-fire the clone once it crosses
+        CHAT_CLONE_THRESHOLD_SECS. The tee records only while the user is speaking, so
+        buffered audio is (near) pure voice. Runs entirely off `user_state_changed`."""
+        original = session.input.audio
+        if original is None:
+            logger.warning("session has no audio input; chat-clone capture disabled")
+            return
+        tee = PassthroughCaptureAudioInput(source=original, max_secs=CAPTURE_MAX_SECS)
+        session.input.audio = tee
+        self._capture = tee
+
+        def _on_user_state_changed(ev) -> None:
+            if ev.new_state == "speaking":
+                self._speech_started_at = ev.created_at
+                tee.recording = True
+                return
+
+            tee.recording = False
+            if self._speech_started_at is not None:
+                delta = ev.created_at - self._speech_started_at
+                if delta > 0:
+                    self._cumulative_speech_secs += delta
+                self._speech_started_at = None
+
+            # Publish capture progress for the on-screen indicator (cheap: one write
+            # per turn boundary). Don't overwrite the terminal states once cloning.
+            if not self._chat_clone_ready:
+                self._spawn(
+                    self._set_clone_attrs(
+                        capture_secs=f"{self._cumulative_speech_secs:.1f}"
+                    )
+                )
+
+            # Threshold crossed at a natural pause (the user just stopped): gate the
+            # imminent reply and hand off to the clone flow. `_suppress_replies` is set
+            # synchronously here so the reply the SDK is about to generate for this turn
+            # (incl. a preemptive one) is dropped by on_user_turn_completed's StopResponse.
+            if (
+                not self._chat_clone_started
+                and not self._chat_clone_ready
+                and self._cumulative_speech_secs >= CHAT_CLONE_THRESHOLD_SECS
+            ):
+                self._chat_clone_ready = True
+                self._suppress_replies = True
+                logger.info(
+                    "chat-clone threshold reached (~%.1fs cumulative); auto-cloning",
+                    self._cumulative_speech_secs,
+                )
+                self._spawn(self.run_chat_clone(session))
+
+        session.on("user_state_changed", _on_user_state_changed)
+
+    async def run_chat_clone(self, session: AgentSession) -> None:
+        """Auto-clone flow for /chat-to-clone: fired once enough of the user's voice is
+        buffered. Interrupt whatever's happening, play a short ack in the current voice
+        while the upload builds, switch the TTS into the fresh clone, and reveal it —
+        the reveal line is the first thing spoken in their own voice. Falls back to
+        staying in the current voice if the upload fails."""
+        if self._chat_clone_started:
+            return
+        self._chat_clone_started = True
+        self._suppress_replies = True
+
+        capture = self._capture
+        if capture is None or capture.buffered_secs < CLONE_MIN_SECS:
+            logger.warning("chat-clone fired with too little audio; staying in voice")
+            self._suppress_replies = False
+            return
+
+        await self._set_clone_state("cloning")
+        # Cut off any in-flight reply so the ack lands cleanly (no-op if silent).
+        with contextlib.suppress(Exception):
+            await session.interrupt(force=True)
+
+        # Hand the buffered frames to the upload and release the tee's hold, so a
+        # second copy of the recording doesn't sit in memory during the WAV build.
+        frames = capture.frames
+        capture.frames = []
+        capture.recording = False
+        upload = asyncio.create_task(self._run_clone_upload(frames, session.vad))
+        ack = None
+        with contextlib.suppress(RuntimeError):
+            ack = session.say(
+                random.choice(CLONE_BUILD_ACKS[self._lang]),
+                add_to_chat_ctx=False,
+                allow_interruptions=False,
+            )
+
+        try:
+            model_id = await upload
+        except Exception as e:
+            logger.exception("chat-clone upload failed; staying in current voice")
+            await self._set_clone_state("idle")
+            self._suppress_replies = False
+            if ack is not None:
+                with contextlib.suppress(Exception):
+                    await ack.wait_for_playout()
+            self._safe_generate_reply(
+                session,
+                f"{CLONE_FALLBACK_GREETING[self._lang]} "
+                f"(Internal note: clone error was {e}.)",
+            )
+            return
+
+        self._ephemeral_voice_ids.append(model_id)
+        await self._set_clone_state("ready")
+
+        # Let the ack finish in the starting voice before the cloned-voice reveal.
+        if ack is not None:
+            with contextlib.suppress(Exception):
+                await ack.wait_for_playout()
+
+        tts = session.tts
+        if isinstance(tts, fishaudio.TTS):
+            tts.update_options(voice_id=model_id)
+            logger.info("switched TTS to chat-cloned voice id=%s", model_id)
+            await self._set_clone_state("playing")
+        else:
+            logger.warning("session TTS is not Fish Audio; cannot switch to clone")
+
+        self._cloned = True
+        await self.update_instructions(
+            build_instructions(self._lang, cloned=True, chat_clone=True)
+        )
+        self._suppress_replies = False
+        self._safe_generate_reply(session, CHAT_CLONE_REVEAL_GREETING[self._lang])
 
     async def _run_clone_upload(self, frames, vad_model) -> str:
         """Trim → upload the buffered frames to Fish, returning the new model_id.
@@ -1109,6 +1400,10 @@ async def my_agent(ctx: JobContext):
     # Session language: "ja" from the /jp landing page, everything else -> "en".
     lang = meta.get("lang") if meta.get("lang") in SUPPORTED_LANGS else "en"
     want_clone = meta.get("clone") is True
+    # /chat-to-clone: converse normally, then auto-clone once ~10s of the user's
+    # voice is buffered. Distinct from clone-first (a scripted read); clone-first
+    # wins if both are somehow set.
+    want_chat_clone = meta.get("chatClone") is True and not want_clone
     requested_voice = meta.get("voice")
     start_voice = (
         requested_voice
@@ -1121,9 +1416,10 @@ async def my_agent(ctx: JobContext):
     if not design_instruction or want_clone:
         design_instruction = None
     logger.info(
-        "session config: lang=%s clone=%s design=%s start_voice=%s (requested=%s)",
+        "session config: lang=%s clone=%s chat_clone=%s design=%s start_voice=%s (requested=%s)",
         lang,
         want_clone,
+        want_chat_clone,
         bool(design_instruction),
         start_voice,
         requested_voice,
@@ -1189,7 +1485,7 @@ async def my_agent(ctx: JobContext):
         ),
     )
 
-    assistant = Assistant(lang=lang)
+    assistant = Assistant(lang=lang, chat_clone=want_chat_clone)
     assistant._job_ctx = ctx
 
     # Record the designed model id for shutdown cleanup the moment the build task
@@ -1287,6 +1583,18 @@ async def my_agent(ctx: JobContext):
         # Design-first: the voice build (already running) finishes behind a short
         # ack, then the TTS swaps into the designed voice for the greeting.
         await assistant.run_design_first(session, ctx, design_task, design_instruction)
+    elif want_chat_clone:
+        # Chat-to-clone: a normal expressive conversation that silently buffers the
+        # user's voice and auto-clones once ~10s is captured (see run_chat_clone). The
+        # capture tee must be live before connect so the opening back-and-forth counts.
+        assistant.install_chat_clone_capture(session)
+        await assistant._set_clone_attrs(
+            state="chatting",
+            threshold_secs=f"{CHAT_CLONE_THRESHOLD_SECS:.0f}",
+            capture_secs="0",
+        )
+        session.generate_reply(instructions=CHAT_CLONE_GREETING[lang])
+        await ctx.connect()
     else:
         # Preset voice: open straight into the expressive conversation.
         session.generate_reply(instructions=PRESET_GREETING[lang])

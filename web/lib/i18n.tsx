@@ -48,6 +48,11 @@ export interface UiStrings {
   cloneKeepReading: (seconds: number) => string;
   cloneBuilding: string;
   designBuilding: string;
+
+  /** /chat-to-clone landing + in-call capture indicator */
+  chatCloneHeading: string;
+  chatCloneDescription: string;
+  chatCloneCapturing: string;
 }
 
 export const UI_STRINGS: Record<Locale, UiStrings> = {
@@ -86,6 +91,11 @@ export const UI_STRINGS: Record<Locale, UiStrings> = {
     cloneKeepReading: (seconds) => `Keep reading — cloning in ${seconds}s`,
     cloneBuilding: 'Cloning your voice',
     designBuilding: 'Designing your voice',
+
+    chatCloneHeading: 'Talk, and hear yourself',
+    chatCloneDescription:
+      'Just start chatting. After about ten seconds of your voice, the agent clones you on the spot and keeps talking — in your own voice. Your recording and the clone are deleted when the call ends.',
+    chatCloneCapturing: 'Keep chatting — cloning your voice',
   },
   ja: {
     welcomeHeading: 'Fish Audioの表現力豊かな声を体験',
@@ -122,6 +132,11 @@ export const UI_STRINGS: Record<Locale, UiStrings> = {
     cloneKeepReading: (seconds) => `そのまま読み続けてください — あと${seconds}秒`,
     cloneBuilding: 'あなたの声をクローン中',
     designBuilding: '声をデザイン中',
+
+    chatCloneHeading: '話すだけで、あなたの声に',
+    chatCloneDescription:
+      'まずは話しかけてください。あなたの声が10秒ほど集まると、その場でクローンが作られ、エージェントはあなた自身の声で話し続けます。録音とクローンは通話終了時に削除されます。',
+    chatCloneCapturing: 'そのまま話し続けてください — 声をクローン中',
   },
 };
 

@@ -5,6 +5,7 @@ import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   type AppConfig,
+  CHAT_CLONE_SELECTION,
   CLONE_SELECTION,
   DESIGN_INSTRUCTION_MAX_CHARS,
   DESIGN_SELECTION,
@@ -38,21 +39,33 @@ interface AppProps {
   /** Landing-page selection to preselect instead of the locale's first preset
    * (e.g. CLONE_SELECTION on /cloning). */
   initialSelection?: string;
+  /** /chat-to-clone: a focused, single-purpose page. Forces the chat-clone
+   * selection (so the agent gets `{chatClone:true}`) and hides the voice picker —
+   * there's nothing to choose. Leaves the / and /cloning pickers untouched. */
+  chatClone?: boolean;
 }
 
-export function App({ appConfig, locale = 'en', headerTitle, initialSelection }: AppProps) {
+export function App({
+  appConfig,
+  locale = 'en',
+  headerTitle,
+  initialSelection,
+  chatClone = false,
+}: AppProps) {
   // The voice choice made on the landing page (a preset voice_id, 'clone', or
   // 'design'). It rides agentMetadata to the worker, so it must be in the
   // useSession options before start() runs. The locale's first preset is
   // pre-selected (Maren on /, さとる on /jp).
-  const [selection, setSelection] = useState<string>(
-    () => initialSelection ?? getDefaultVoiceId(locale)
+  const [selection, setSelection] = useState<string>(() =>
+    chatClone ? CHAT_CLONE_SELECTION : (initialSelection ?? getDefaultVoiceId(locale))
   );
   // Free-text description for the "design a voice" option; rides agentMetadata too.
   const [designInstruction, setDesignInstruction] = useState('');
 
   const agentMetadata = useMemo(() => {
     if (selection === CLONE_SELECTION) return JSON.stringify({ clone: true, lang: locale });
+    if (selection === CHAT_CLONE_SELECTION)
+      return JSON.stringify({ chatClone: true, lang: locale });
     if (selection === DESIGN_SELECTION) {
       return JSON.stringify({
         design: designInstruction.trim().slice(0, DESIGN_INSTRUCTION_MAX_CHARS),
@@ -149,6 +162,7 @@ export function App({ appConfig, locale = 'en', headerTitle, initialSelection }:
               onSelectionChange={setSelection}
               designInstruction={designInstruction}
               onDesignInstructionChange={setDesignInstruction}
+              chatClone={chatClone}
             />
           </ErrorBoundary>
         </main>

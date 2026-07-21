@@ -33,6 +33,8 @@ interface ViewControllerProps {
   onSelectionChange: (selection: string) => void;
   designInstruction: string;
   onDesignInstructionChange: (value: string) => void;
+  /** /chat-to-clone: render the focused welcome (no voice picker). */
+  chatClone?: boolean;
 }
 
 export function ViewController({
@@ -41,6 +43,7 @@ export function ViewController({
   onSelectionChange,
   designInstruction,
   onDesignInstructionChange,
+  chatClone = false,
 }: ViewControllerProps) {
   const { isConnected, start } = useSessionContext();
 
@@ -56,6 +59,7 @@ export function ViewController({
           onSelectionChange={onSelectionChange}
           designInstruction={designInstruction}
           onDesignInstructionChange={onDesignInstructionChange}
+          chatClone={chatClone}
           onStartCall={start}
         />
       )}
@@ -67,6 +71,7 @@ export function ViewController({
           supportsVideoInput={appConfig.supportsVideoInput}
           supportsScreenShare={appConfig.supportsScreenShare}
           isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}
+          chatClone={chatClone}
           className="fixed inset-0"
         />
       )}

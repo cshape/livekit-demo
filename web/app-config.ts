@@ -83,6 +83,13 @@ export const CLONE_SELECTION = 'clone' as const;
 /** Sentinel selection value meaning "design a voice from a text description". */
 export const DESIGN_SELECTION = 'design' as const;
 
+/**
+ * Sentinel selection value for the /chat-to-clone conversational-cloning page: no
+ * scripted read — just talk for ~10s and the agent clones you mid-conversation.
+ * Rides the agent metadata as `{"chatClone": true}`.
+ */
+export const CHAT_CLONE_SELECTION = 'chat-clone' as const;
+
 /** Max characters accepted for a voice-design description (Fish's API caps it at 2000). */
 export const DESIGN_INSTRUCTION_MAX_CHARS = 2000;
 

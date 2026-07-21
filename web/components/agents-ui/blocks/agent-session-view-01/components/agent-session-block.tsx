@@ -9,6 +9,7 @@ import {
   type AgentControlBarControls,
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { ChatCloneStatus } from '@/components/app/chat-clone-status';
 import { CloneScriptCard } from '@/components/app/clone-script-card';
 import { DesignStatusCard } from '@/components/app/design-status-card';
 import { ModeToggle } from '@/components/app/mode-toggle';
@@ -130,6 +131,15 @@ export interface AgentSessionView_01Props {
    */
   isPreConnectBufferEnabled?: boolean;
 
+  /**
+   * /chat-to-clone session: hide the register toggle + mood indicator (that page is
+   * about cloning, not the expressive-register demo) and show the capture/cloning
+   * status pill instead.
+   *
+   * @default false
+   */
+  chatClone?: boolean;
+
   /** Optional class name merged onto the outer `<section>` container. */
   className?: string;
 }
@@ -139,6 +149,7 @@ export function AgentSessionView_01({
   supportsVideoInput = false,
   supportsScreenShare = false,
   isPreConnectBufferEnabled = true,
+  chatClone = false,
   ref,
   className,
   ...props
@@ -220,11 +231,18 @@ export function AgentSessionView_01({
         )}
         <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
           <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
-          {/* Custom voice UI: user-driven register toggle + cosmetic mood/state ring */}
-          <div className="mb-3 flex flex-col items-center gap-2">
-            <ModeToggle />
-            <MoodIndicator />
-          </div>
+          {/* Chat-to-clone capture/cloning status, in normal flow above the controls
+              (never an overlay), so it can't overrun the transcript on any viewport.
+              Renders nothing outside a chat-to-clone session. */}
+          {chatClone && <ChatCloneStatus className="mx-auto mb-3" />}
+          {/* Expressive-demo UI: user-driven register toggle + cosmetic mood/state
+              ring. Hidden on /chat-to-clone, which is focused on cloning. */}
+          {!chatClone && (
+            <div className="mb-3 flex flex-col items-center gap-2">
+              <ModeToggle />
+              <MoodIndicator />
+            </div>
+          )}
           <AgentControlBar
             variant="livekit"
             controls={controls}
